@@ -27,5 +27,5 @@ Windows Registry Editor Version 5.00
 "MultiSelectModel"="Player"
 
 [HKEY_CLASSES_ROOT\SystemFileAssociations\.txt\Shell\p4merge\Command]
-@="\"d:\\singleinstance.exe\" %1 \"C:\\Program Files\\Perforce\\p4merge.exe\" $files --si-timeout 400"
+@="\"d:\\singleinstance.exe\" \"%1\" \"C:\\Program Files\\Perforce\\p4merge.exe\" $files --si-timeout 400"
 ```
