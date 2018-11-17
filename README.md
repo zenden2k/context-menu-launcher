@@ -3,7 +3,7 @@ Select multiple files from Windows Explorer menu and launch just one instance of
 
 [Download executable](https://github.com/zenden2k/context-menu-launcher/releases/tag/1.0)
 
-##How to pass multiple files to shell context menu command (Windows Explorer)
+## How to pass multiple files to shell context menu command (Windows Explorer)
 
 You can archive it with this program. No shell extensions involved.
 
