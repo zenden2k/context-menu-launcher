@@ -18,6 +18,7 @@ Windows Registry Editor Version 5.00
 
 */
 #include <Shellapi.h>
+#include <atomic>
 #include <vector>
 #include <string>
 
@@ -158,13 +159,19 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow) {
    return TRUE;
 }
 
-void ArgvQuote(const std::wstring& Argument, std::wstring& CommandLine, bool Force){
+void ArgvQuote(const std::wstring& Argument, std::wstring& CommandLine, bool Force, bool singlequote){
+    wchar_t mark;
+    if (singlequote) {
+        mark = L'\'';
+    } else {
+        mark = L'"';
+    }
     if (Force == false &&
         Argument.empty() == false &&
         Argument.find_first_of(L" \t\n\v\"") == Argument.npos) {
         CommandLine.append(Argument);
     } else {
-        CommandLine.push_back(L'"');
+        CommandLine.push_back(mark);
 
         for (auto It = Argument.begin();; ++It) {
             unsigned NumberBackslashes = 0;
@@ -196,7 +203,7 @@ void ArgvQuote(const std::wstring& Argument, std::wstring& CommandLine, bool For
             }
         }
 
-        CommandLine.push_back(L'"');
+        CommandLine.push_back(mark);
     }
     CommandLine.push_back(L' ');
 }
@@ -207,16 +214,16 @@ void LaunchApp() {
     for (int i = 3; i < argCount; i++) {
         if (!lstrcmp(szArgList[i], _T("$files"))) {
             for (const auto& file : files) {
-                ArgvQuote(file, cmdLine, true);
+                ArgvQuote(file, cmdLine, true, true);
             }
         } else if (!lstrcmp(szArgList[i], _T("--si-timeout"))) {
             i++; // skip
         }
         else {
-            ArgvQuote(szArgList[i], cmdLine, true);
+            ArgvQuote(szArgList[i], cmdLine, true, false);
         }
     }
-    //MessageBox(0, cmdLine.c_str(), szArgList[2], 0);
+    // MessageBox(0, cmdLine.c_str(), szArgList[2], 0);
     HINSTANCE hinst =  ShellExecute(0, _T("open"), szArgList[2], cmdLine.c_str(), 0, SW_SHOWNORMAL);
     if (reinterpret_cast<int>(hinst) <= 32) {
         TCHAR buffer[256];
