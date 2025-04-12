@@ -21,6 +21,7 @@ Windows Registry Editor Version 5.00
 #include <atomic>
 #include <vector>
 #include <string>
+#include <regex>
 
 class CLimitSingleInstance {
 protected:
@@ -212,18 +213,22 @@ void LaunchApp() {
     std::wstring cmdLine;
    
     for (int i = 3; i < argCount; i++) {
-        if (!lstrcmp(szArgList[i], _T("$files"))) {
+        std::wstring argStr = szArgList[i];
+        std::size_t found = argStr.find(L"$files");
+        if (found!=std::string::npos) {
+            std::wstring tmpstr;
             for (const auto& file : files) {
-                ArgvQuote(file, cmdLine, true, true);
+                ArgvQuote(file, tmpstr, true, true);
             }
-        } else if (!lstrcmp(szArgList[i], _T("--si-timeout"))) {
+            argStr = std::regex_replace(argStr, std::wregex(L"\\$files"), tmpstr);
+            cmdLine.append(argStr);
+        } else if (argStr == L"--si-timeout") {
             i++; // skip
-        }
-        else {
-            ArgvQuote(szArgList[i], cmdLine, true, false);
+        } else {
+            ArgvQuote(argStr, cmdLine, true, false);
         }
     }
-    // MessageBox(0, cmdLine.c_str(), szArgList[2], 0);
+    MessageBox(0, cmdLine.c_str(), szArgList[2], 0);
     HINSTANCE hinst =  ShellExecute(0, _T("open"), szArgList[2], cmdLine.c_str(), 0, SW_SHOWNORMAL);
     if (reinterpret_cast<int>(hinst) <= 32) {
         TCHAR buffer[256];
