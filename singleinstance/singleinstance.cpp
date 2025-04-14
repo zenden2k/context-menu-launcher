@@ -228,7 +228,7 @@ void LaunchApp() {
             ArgvQuote(argStr, cmdLine, true, false);
         }
     }
-    MessageBox(0, cmdLine.c_str(), szArgList[2], 0);
+    // MessageBox(0, cmdLine.c_str(), szArgList[2], 0);
     HINSTANCE hinst =  ShellExecute(0, _T("open"), szArgList[2], cmdLine.c_str(), 0, SW_SHOWNORMAL);
     if (reinterpret_cast<int>(hinst) <= 32) {
         TCHAR buffer[256];
