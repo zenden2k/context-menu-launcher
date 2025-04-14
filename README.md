@@ -1,7 +1,7 @@
 # context-menu-launcher
 Select multiple files from Windows Explorer menu and launch just one instance of process
 
-[Download executable](https://github.com/owenstake/context-menu-launcher/releases/download/v1.0.2/singleinstance.exe)
+[Download executable](https://github.com/owenstake/context-menu-launcher/releases/download/v1.0.3/singleinstance.exe)
 
 ## How to pass multiple files to shell context menu command (Windows Explorer)
 
