@@ -249,6 +249,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         SetTimer(hWnd, TIMER_ID, timeout, 0);
         break;
     case WM_COPYDATA:
+        SetTimer(hWnd, TIMER_ID, timeout, 0);
         pcds = reinterpret_cast<COPYDATASTRUCT*>(lParam);
         if (pcds->dwData == 1) {  
             LPCTSTR lpszString = reinterpret_cast<LPCTSTR>(pcds->lpData);
