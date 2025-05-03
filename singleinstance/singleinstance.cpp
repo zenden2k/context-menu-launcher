@@ -18,32 +18,34 @@ Windows Registry Editor Version 5.00
 
 */
 #include <Shellapi.h>
+#include <atomic>
 #include <vector>
 #include <string>
+#include <regex>
 
 class CLimitSingleInstance {
-protected:
-    DWORD  m_dwLastError;
-    HANDLE m_hMutex;
+    protected:
+        DWORD  m_dwLastError;
+        HANDLE m_hMutex;
 
-public:
-    CLimitSingleInstance(TCHAR *strMutexName)
-    {
-        m_hMutex = CreateMutex(NULL, FALSE, strMutexName); //do early
-        m_dwLastError = GetLastError(); //save for use later...
-    }
-
-    ~CLimitSingleInstance(){
-        if (m_hMutex)  //Do not forget to close handles.
+    public:
+        CLimitSingleInstance(TCHAR *strMutexName)
         {
-            CloseHandle(m_hMutex); //Do as late as possible.
-            m_hMutex = NULL; //Good habit to be in.
+            m_hMutex = CreateMutex(NULL, FALSE, strMutexName); //do early
+            m_dwLastError = GetLastError(); //save for use later...
         }
-    }
 
-    BOOL IsAnotherInstanceRunning(){
-        return (ERROR_ALREADY_EXISTS == m_dwLastError);
-    }
+        ~CLimitSingleInstance(){
+            if (m_hMutex)  //Do not forget to close handles.
+            {
+                CloseHandle(m_hMutex); //Do as late as possible.
+                m_hMutex = NULL; //Good habit to be in.
+            }
+        }
+
+        BOOL IsAnotherInstanceRunning(){
+            return (ERROR_ALREADY_EXISTS == m_dwLastError);
+        }
 };
 
 int timeout = 400; // ms
@@ -158,13 +160,19 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow) {
    return TRUE;
 }
 
-void ArgvQuote(const std::wstring& Argument, std::wstring& CommandLine, bool Force){
+void ArgvQuote(const std::wstring& Argument, std::wstring& CommandLine, bool Force, bool singlequote){
+    wchar_t mark;
+    if (singlequote) {
+        mark = L'\'';
+    } else {
+        mark = L'"';
+    }
     if (Force == false &&
         Argument.empty() == false &&
         Argument.find_first_of(L" \t\n\v\"") == Argument.npos) {
         CommandLine.append(Argument);
     } else {
-        CommandLine.push_back(L'"');
+        CommandLine.push_back(mark);
 
         for (auto It = Argument.begin();; ++It) {
             unsigned NumberBackslashes = 0;
@@ -196,7 +204,7 @@ void ArgvQuote(const std::wstring& Argument, std::wstring& CommandLine, bool For
             }
         }
 
-        CommandLine.push_back(L'"');
+        CommandLine.push_back(mark);
     }
     CommandLine.push_back(L' ');
 }
@@ -205,18 +213,22 @@ void LaunchApp() {
     std::wstring cmdLine;
    
     for (int i = 3; i < argCount; i++) {
-        if (!lstrcmp(szArgList[i], _T("$files"))) {
+        std::wstring argStr = szArgList[i];
+        std::size_t found = argStr.find(L"$files");
+        if (found!=std::string::npos) {
+            std::wstring tmpstr;
             for (const auto& file : files) {
-                ArgvQuote(file, cmdLine, true);
+                ArgvQuote(file, tmpstr, true, true);
             }
-        } else if (!lstrcmp(szArgList[i], _T("--si-timeout"))) {
+            argStr = std::regex_replace(argStr, std::wregex(L"\\$files"), tmpstr);
+            cmdLine.append(argStr);
+        } else if (argStr == L"--si-timeout") {
             i++; // skip
-        }
-        else {
-            ArgvQuote(szArgList[i], cmdLine, true);
+        } else {
+            ArgvQuote(argStr, cmdLine, true, false);
         }
     }
-    //MessageBox(0, cmdLine.c_str(), szArgList[2], 0);
+    // MessageBox(0, cmdLine.c_str(), szArgList[2], 0);
     HINSTANCE hinst =  ShellExecute(0, _T("open"), szArgList[2], cmdLine.c_str(), 0, SW_SHOWNORMAL);
     if (reinterpret_cast<int>(hinst) <= 32) {
         TCHAR buffer[256];
@@ -237,6 +249,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         SetTimer(hWnd, TIMER_ID, timeout, 0);
         break;
     case WM_COPYDATA:
+        SetTimer(hWnd, TIMER_ID, timeout, 0);
         pcds = reinterpret_cast<COPYDATASTRUCT*>(lParam);
         if (pcds->dwData == 1) {  
             LPCTSTR lpszString = reinterpret_cast<LPCTSTR>(pcds->lpData);

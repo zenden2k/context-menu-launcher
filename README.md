@@ -1,7 +1,17 @@
+
+# Static compilation
+```powershell
+# compile release
+& 'C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe' /m:8 /property:Configuration=Release .\singleinstance.sln
+
+# check dll depends
+&'C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.43.34808\bin\Hostx64\x64\dumpbin.exe' /dependents .\Release\singleinstance.exe
+```
+
 # context-menu-launcher
 Select multiple files from Windows Explorer menu and launch just one instance of process
 
-[Download executable](https://github.com/zenden2k/context-menu-launcher/releases/tag/1.0)
+[Download executable](https://github.com/owenstake/context-menu-launcher/releases/download/latest/singleinstance.exe)
 
 ## How to pass multiple files to shell context menu command (Windows Explorer)
 
