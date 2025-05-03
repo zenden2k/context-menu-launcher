@@ -1,7 +1,11 @@
 
 # Static compilation
 ```powershell
+# compile release
 & 'C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe' /m:8 /property:Configuration=Release .\singleinstance.sln
+
+# check dll depends
+&'C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.43.34808\bin\Hostx64\x64\dumpbin.exe' /dependents .\Release\singleinstance.exe
 ```
 
 # context-menu-launcher
