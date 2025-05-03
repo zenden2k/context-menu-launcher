@@ -1,3 +1,9 @@
+
+# Static compilation
+```powershell
+& 'C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe' /m:8 /property:Configuration=Release .\singleinstance.sln
+```
+
 # context-menu-launcher
 Select multiple files from Windows Explorer menu and launch just one instance of process
 
