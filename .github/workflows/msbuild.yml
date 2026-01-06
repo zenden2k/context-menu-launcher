@@ -1,0 +1,65 @@
+name: MSBuild
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+
+env:
+  SOLUTION_FILE_PATH: .
+  BUILD_CONFIGURATION: Release
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    # --- THE DISCLAIMER ---
+    - name: ⚠️ Legal & Safety Notice
+      shell: pwsh
+      run: |
+        $msg = @"
+        ### 🚀 Build Disclaimer & Safety Warning
+        
+        > [!IMPORTANT]
+        > This workflow build made from the code you can see in the repo is supplied **"AS-IS"** without support, warranty, or even a sense of self-preservation.
+        
+        **Potential Side Effects include:**
+        * Your OS might decide it's better off as a blank screen. 🖥️💨
+        * Your files may leave this physical realm without notice. 🚮
+        * Your computer spontaneously becoming a very expensive space heater. 🌡️
+        * Global stock markets performing a backflip. 📉
+        * Coffee machines refusing to brew. ☕
+        * Unexpected temporal anomalies. 🌀
+        
+        If the world ends, **it's not our fault.** Use at your own risk!
+        "@
+        echo $msg >> $GITHUB_STEP_SUMMARY
+        Write-Host "Disclaimer posted to Job Summary." -ForegroundColor Cyan
+
+    - name: Add MSBuild to PATH
+      uses: microsoft/setup-msbuild@v2 # Updated to v2
+
+    - name: Restore NuGet packages
+      working-directory: ${{env.GITHUB_WORKSPACE}}
+      run: nuget restore ${{env.SOLUTION_FILE_PATH}}
+
+    - name: Build
+      working-directory: ${{env.GITHUB_WORKSPACE}}
+      run: msbuild /m /p:Configuration=${{env.BUILD_CONFIGURATION}} ${{env.SOLUTION_FILE_PATH}}
+
+    # --- EXPORT THE EXE ---
+    - name: Upload Build Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: singleinstance-binary
+        path: |
+           ./Release/*.exe
+           # Exclude the PDBs as discussed earlier to keep it clean
+           !./Release/*.pdb
