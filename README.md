@@ -7,6 +7,11 @@
 # check dll depends
 &'C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.43.34808\bin\Hostx64\x64\dumpbin.exe' /dependents .\Release\singleinstance.exe
 ```
+**OR**
+```
+# Run this to automatically find Visual Studio and your current MSVC version, then build and test
+build_singleinstance.ps1
+```
 
 # context-menu-launcher
 Select multiple files from Windows Explorer menu and launch just one instance of process
