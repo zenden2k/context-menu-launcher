@@ -17,17 +17,14 @@ jobs:
     runs-on: windows-latest
     steps:
     - uses: actions/checkout@v4
-
-    - name: ➕ Add MSBuild to PATH
+    - name: ➕ Add MSBuild
       uses: microsoft/setup-msbuild@v2
-
-    - name: 🏗️ NuGet Restore & Build
+    - name: 🏗️ Build
       run: |
         nuget restore ${{env.SOLUTION_FILE_PATH}}
         msbuild /m:8 /p:Configuration=Release ${{env.SOLUTION_FILE_PATH}}
         msbuild /m:8 /p:Configuration=ReleaseHidden ${{env.SOLUTION_FILE_PATH}}
-
-    - name: 🔒 Lock Intermediate Binaries
+    - name: 🔒 Lock
       shell: pwsh
       run: |
         $h1 = (Get-FileHash Release\singleinstance.exe -Algorithm SHA256).Hash.ToLower()
@@ -35,8 +32,7 @@ jobs:
         "$h1  singleinstance.exe" | Set-Content -Path Release\checksums.txt -Encoding Ascii
         "$h2  singleinstance_hidden.exe" | Add-Content -Path Release\checksums.txt
         7z a -p"${{ env.SESSION_KEY }}" "${{ runner.temp }}/encrypted_binaries.7z" ./Release/*.exe ./Release/checksums.txt
-
-    - name: 📤 Upload Locked Artifact
+    - name: 📤 Upload
       uses: actions/upload-artifact@v4
       with:
         name: locked-binaries
@@ -49,7 +45,7 @@ jobs:
     needs: build-windows
     runs-on: windows-latest
     steps:
-    - name: 📥 Download Locked Artifact
+    - name: 📥 Download
       uses: actions/download-artifact@v4
       with:
         name: locked-binaries
@@ -68,13 +64,15 @@ jobs:
         $rule = 'import "pe" rule Win32_Executable_Audit { condition: uint16(0) == 0x5A4D and pe.subsystem == pe.SUBSYSTEM_WINDOWS_GUI }'
         $rule | Set-Content -Path "$($env:RUNNER_TEMP)/audit.yar" -Encoding Ascii
 
-        # 3. Setup BinSkim (Dynamic Path Discovery)
+        # 3. Setup BinSkim
         Invoke-WebRequest -Uri "https://www.nuget.org/api/v2/package/Microsoft.CodeAnalysis.BinSkim/4.4.9" -OutFile "$($env:RUNNER_TEMP)/binskim.zip"
         Expand-Archive -Path "$($env:RUNNER_TEMP)/binskim.zip" -DestinationPath "$($env:RUNNER_TEMP)/binskim-bin" -Force
         
-        # Find the exe regardless of where it is in the package
         $binskimExe = (Get-ChildItem -Path "$($env:RUNNER_TEMP)/binskim-bin" -Filter "BinSkim.exe" -Recurse | Select-Object -First 1).FullName
-        Write-Host "Found BinSkim at: $binskimExe"
+        
+        # --- CRITICAL: UNBLOCK DOWNLOADED TOOLS ---
+        Unblock-File -Path $binskimExe
+        Unblock-File -Path "$($env:RUNNER_TEMP)/yara-bin/yara64.exe"
 
         "### 🛡️ Heuristics & Hardening Report" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
         "| File | YARA Match | Status |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
@@ -82,11 +80,15 @@ jobs:
 
         $files = Get-ChildItem "$($env:RUNNER_TEMP)/audit/*.exe"
         foreach ($f in $files) {
+            Write-Host "🔍 Auditing: $($f.Name)..."
+            
+            # Run YARA
             $yaraRes = & "$($env:RUNNER_TEMP)/yara-bin/yara64.exe" -m "$($env:RUNNER_TEMP)/audit.yar" $f.FullName
             $cleanYara = $yaraRes.Replace(" []", "").Trim()
             
-            # Run BinSkim analyze
-            & $binskimExe analyze $f.FullName --quiet
+            # Run BinSkim (Removed --quiet to see if it hangs or errors)
+            Write-Host "🔧 Running Hardening Check on $($f.Name)..."
+            & $binskimExe analyze $f.FullName
             
             "| **$($f.Name)** | ``$cleanYara`` | ✅ HARDENED |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
         }
@@ -97,18 +99,16 @@ jobs:
     needs: audit-windows
     runs-on: ubuntu-latest
     steps:
-    - name: 📥 Download Locked Artifact
+    - name: 📥 Download
       uses: actions/download-artifact@v4
       with:
         name: locked-binaries
         path: ${{ runner.temp }}
-
-    - name: 🔓 Unlock for Final Scan
+    - name: 🔓 Unlock
       run: |
         mkdir -p ./final-build
         7z x -p"${{ env.SESSION_KEY }}" "${{ runner.temp }}/encrypted_binaries.7z" -o./final-build
-
-    - name: 🔍 Integrity Verification
+    - name: 🔍 Verify
       working-directory: final-build
       run: |
         echo "### 📂 Cross-Platform Integrity Check" >> $GITHUB_STEP_SUMMARY
@@ -118,14 +118,12 @@ jobs:
         while read -r hash file; do
            echo "| **$file** | \`$hash\` |" >> $GITHUB_STEP_SUMMARY
         done < checksums.txt
-
-    - name: 🛡️ ClamAV Virus Scan
+    - name: 🛡️ ClamAV Scan
       uses: hugoalh/scan-virus-ghaction@v0.20.1
       with:
         clamav_enable: true
         yara_enable: false
-
-    - name: 🚀 FINAL RELEASE UPLOAD
+    - name: 🚀 FINAL RELEASE
       uses: actions/upload-artifact@v4
       with:
         name: singleinstance-FINAL-VERIFIED
