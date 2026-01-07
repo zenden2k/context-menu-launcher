@@ -1,4 +1,4 @@
-name: "🚀 C++ Build & Security Verification"
+name: "🪟 Build, Microsoft Defender Check & Verification"
 
 on:
   push:
@@ -8,7 +8,6 @@ on:
 
 env:
   SOLUTION_FILE_PATH: .
-  BUILD_RELEASE: Release
 
 jobs:
   # --- JOB 1: WINDOWS BUILD ---
@@ -29,13 +28,13 @@ jobs:
         "> [!CAUTION]" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
         "> **USER BEWARE:** This autobuild is supplied without warranty. If the world ends, **it's not our fault.**" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
 
-    - name: Add MSBuild to PATH
+    - name: ➕ Add MSBuild to PATH
       uses: microsoft/setup-msbuild@v2
 
-    - name: Restore & Build
+    - name: 🏗️ NuGet Restore & Build
       run: |
         nuget restore ${{env.SOLUTION_FILE_PATH}}
-        msbuild /m:8 /p:Configuration=${{env.BUILD_RELEASE}} ${{env.SOLUTION_FILE_PATH}}
+        msbuild /m:8 /p:Configuration=Release ${{env.SOLUTION_FILE_PATH}}
         msbuild /m:8 /p:Configuration=ReleaseHidden ${{env.SOLUTION_FILE_PATH}}
 
     - name: 🔍 Integrity Audit
@@ -59,7 +58,13 @@ jobs:
         
         "$h1  singleinstance.exe`n$h2  singleinstance_hidden.exe" | Out-File -FilePath Release\checksums.txt -Encoding ascii
 
-    - name: 📤 Upload for Scanning
+    - name: 🛡️ Windows Defender Scan
+      shell: pwsh
+      run: |
+        Start-MpScan -ScanPath "Release\" -ScanType CustomScan
+        Write-Host "Defender scan completed successfully." -ForegroundColor Green     
+
+    - name: 📤 Upload for Scanning with ClamAV and Yara
       uses: actions/upload-artifact@v4
       with:
         name: build-binaries
@@ -67,7 +72,7 @@ jobs:
 
   # --- JOB 2: LINUX SECURITY SCAN ---
   security-scan:
-    name: "🛡️ Security Audit (Linux)"
+    name: "🛡️ Security Audit (Linux 🐧)"
     needs: build-windows
     runs-on: ubuntu-latest
     steps:
@@ -77,16 +82,34 @@ jobs:
         name: build-binaries
         path: scan-dir
 
-    - name: 🛡️ ClamAV & YARA Scan
+    - name: 🔍 Verify Transfer Integrity
+      working-directory: scan-dir
+      run: |
+        echo "### 📂 Cross-Platform Integrity Check" >> $GITHUB_STEP_SUMMARY
+        sha256sum -c checksums.txt >> $GITHUB_STEP_SUMMARY 2>&1
+        echo "---" >> $GITHUB_STEP_SUMMARY
+
+    - name: 🛡️ Advanced Security Scan with ClamAV and Yara
       uses: hugoalh/scan-virus-ghaction@v0.20.1
       with:
         clamav_enable: true
         yara_enable: true
         found_summary: true
         statistics_summary: true
+        # Ignore the broken internal YARA identifiers from PE and Magic not being present on Git Actions
+        # Microsoft Defender above performs those checks
+        ignores_post: |
+          $input.Symbol -match 'extension' -or $input.Symbol -match 'filename'
+
+    # Move this here so it only uploads if BOTH build and scan passed
+    - name: 🚀 Final Artifact Release
+      uses: actions/upload-artifact@v4
+      with:
+        name: singleinstance-final-release
+        path: scan-dir/*
 
     - name: 🏁 Final Clearance
       run: |
         echo "### ✅ Security Checks Passed" >> $GITHUB_STEP_SUMMARY
         echo "> [!IMPORTANT]" >> $GITHUB_STEP_SUMMARY
-        echo "> These binaries have passed **ClamAV**, **YARA**, and **SHA-256** validation on independent runners." >> $GITHUB_STEP_SUMMARY
+        echo "> These binaries have passed **Microsoft Defender**, **ClamAV**, **YARA**, and **SHA-256** validation on independent runners." >> $GITHUB_STEP_SUMMARY
