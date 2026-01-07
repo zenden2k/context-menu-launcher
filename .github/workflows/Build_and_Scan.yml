@@ -1,4 +1,4 @@
-name: "🪟 Build, Microsoft Defender Check & Verification"
+name: "🚀 Build, Microsoft Defender Check & Verification"
 
 on:
   push:
@@ -10,13 +10,10 @@ env:
   SOLUTION_FILE_PATH: .
 
 jobs:
-  # --- JOB 1: WINDOWS BUILD ---
+  # --- JOB 1: WINDOWS BUILD & LOCAL AUDIT ---
   build-windows:
-    name: "🏗️ Build, Microsoft Defender Check & Verification (Win x86 🪟) "
+    name: "🏗️ Build & Win-Audit (Win x86 🪟)"
     runs-on: windows-latest
-    outputs:
-      hash1: ${{ steps.audit.outputs.hash1 }}
-      hash2: ${{ steps.audit.outputs.hash2 }}
     steps:
     - uses: actions/checkout@v4
 
@@ -37,58 +34,44 @@ jobs:
         msbuild /m:8 /p:Configuration=Release ${{env.SOLUTION_FILE_PATH}}
         msbuild /m:8 /p:Configuration=ReleaseHidden ${{env.SOLUTION_FILE_PATH}}
 
-    - name: 🔍 Integrity Audit
-      id: audit
+    - name: 🔍 Integrity Audit (SHA-256)
       shell: pwsh
       run: |
         $exe1 = "Release\singleinstance.exe"
         $exe2 = "Release\singleinstance_hidden.exe"
-        $h1 = (Get-FileHash $exe1 -Algorithm SHA256).Hash
-        $h2 = (Get-FileHash $exe2 -Algorithm SHA256).Hash
+        $h1 = (Get-FileHash $exe1 -Algorithm SHA256).Hash.ToLower()
+        $h2 = (Get-FileHash $exe2 -Algorithm SHA256).Hash.ToLower()
         
-        # Save for next job
-        echo "hash1=$h1" >> $env:GITHUB_OUTPUT
-        echo "hash2=$h2" >> $env:GITHUB_OUTPUT
+        # Write checksums for Linux (hash + space + space + filename)
+        "$h1  singleinstance.exe" | Out-File -FilePath Release\checksums.txt -Encoding ascii
+        "$h2  singleinstance_hidden.exe" | Add-Content -Path Release\checksums.txt
 
         "### 🔒 Binary Integrity Report" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
         "| File | SHA-256 Checksum |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
         "| :--- | :--- |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
         "| **singleinstance.exe** | ``$h1`` |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
         "| **singleinstance_hidden.exe** | ``$h2`` |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
-        
-        "$h1  singleinstance.exe`n$h2  singleinstance_hidden.exe" | Out-File -FilePath Release\checksums.txt -Encoding ascii
 
-    - name: 🔍 Deep PE Audit (YARA)
+    - name: 🔍 Deep PE Audit (YARA Win64)
       shell: pwsh
       run: |
-        # 1. Download standalone YARA
         Invoke-WebRequest -Uri "https://github.com/VirusTotal/yara/releases/download/v4.5.2/yara-v4.5.2-2326-win64.zip" -OutFile "yara.zip"
         Expand-Archive -Path "yara.zip" -DestinationPath "yara-bin"
-        
-        # 2. Create a basic PE Audit Rule
-        $rule = @"
-        import "pe"
-        rule Win32_Executable_Audit {
-            condition:
-                uint16(0) == 0x5A4D and pe.subsystem == pe.SUBSYSTEM_WINDOWS_GUI
-        }
-        "@
+        $rule = "import 'pe'`nrule Win32_Executable_Audit { condition: uint16(0) == 0x5A4D and pe.subsystem == pe.SUBSYSTEM_WINDOWS_GUI }"
         $rule | Out-File -FilePath "audit.yar" -Encoding ascii
-
-        # 3. Run the scan
-        Write-Host "Starting Deep PE Audit..." -ForegroundColor Cyan
         ./yara-bin/yara64.exe -m audit.yar Release/singleinstance.exe
         ./yara-bin/yara64.exe -m audit.yar Release/singleinstance_hidden.exe
-        
-        "✅ Deep PE Audit Complete (YARA 4.5.2)" | Add-Content -Path $env:GITHUB_STEP_SUMMARY  
+        "✅ Deep PE Audit Complete (YARA 4.5.2)" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
 
-    - name: 📤 Upload for Scanning with ClamAV, Yara and Microsoft Defender under Linux 🐧
+    - name: 📤 Upload Binaries for Linux Scan
       uses: actions/upload-artifact@v4
       with:
         name: build-binaries
-        path: Release/*.exe
+        path: |
+          Release/*.exe
+          Release/checksums.txt
 
-  # --- JOB 2: LINUX SECURITY SCAN ---
+  # --- JOB 2: LINUX MULTI-ENGINE SCAN ---
   security-scan:
     name: "🛡️ Security Audit (Linux 🐧)"
     needs: build-windows
@@ -104,28 +87,29 @@ jobs:
       working-directory: scan-dir
       run: |
         echo "### 📂 Cross-Platform Integrity Check" >> $GITHUB_STEP_SUMMARY
-        sha256sum -c checksums.txt >> $GITHUB_STEP_SUMMARY 2>&1
+        if sha256sum -c checksums.txt; then
+          echo "✅ Integrity check passed." >> $GITHUB_STEP_SUMMARY
+        else
+          echo "❌ Integrity check failed!" >> $GITHUB_STEP_SUMMARY
+          exit 1
+        fi
         echo "---" >> $GITHUB_STEP_SUMMARY
 
-    - name: 🛡️ Advanced Security Scan with ClamAV and Yara
+    - name: 🛡️ ClamAV & YARA Scan
       uses: hugoalh/scan-virus-ghaction@v0.20.1
       with:
         clamav_enable: true
         yara_enable: true
         found_summary: true
         statistics_summary: true
-        # Ignore the broken internal YARA identifiers from PE and Magic not being present on Git Actions
-        # Microsoft Defender above performs those checks
         ignores_post: |
           $input.Symbol -match 'extension' -or $input.Symbol -match 'filename'
 
     - name: 🛡️ Microsoft Defender Scan (Linux)
       uses: jbrotsos/jbro-test-ghaction@v1
       with:
-        # We tell it to scan the folder containing your artifacts
-        args: "scan --path ./scan-dir"       
+        args: "scan --path ./scan-dir"
 
-    # Move this here so it only uploads if BOTH build and scan passed
     - name: 🚀 Final Artifact Release
       uses: actions/upload-artifact@v4
       with:
@@ -136,4 +120,4 @@ jobs:
       run: |
         echo "### ✅ Security Checks Passed" >> $GITHUB_STEP_SUMMARY
         echo "> [!IMPORTANT]" >> $GITHUB_STEP_SUMMARY
-        echo "> These binaries have passed **Microsoft Defender**, **ClamAV**, **YARA**, and **SHA-256** validation on independent runners." >> $GITHUB_STEP_SUMMARY
+        echo "> Binaries verified via **Microsoft Defender**, **ClamAV**, **YARA (Win/Linux)**, and **SHA-256 Checksums**." >> $GITHUB_STEP_SUMMARY
