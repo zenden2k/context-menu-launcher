@@ -30,13 +30,10 @@ jobs:
     - name: 🔒 Lock Intermediate Binaries
       shell: pwsh
       run: |
-        # Generate checksums before locking
         $h1 = (Get-FileHash Release\singleinstance.exe -Algorithm SHA256).Hash.ToLower()
         $h2 = (Get-FileHash Release\singleinstance_hidden.exe -Algorithm SHA256).Hash.ToLower()
         "$h1  singleinstance.exe" | Set-Content -Path Release\checksums.txt -Encoding Ascii
         "$h2  singleinstance_hidden.exe" | Add-Content -Path Release\checksums.txt
-
-        # Create the encrypted archive in the temp folder
         7z a -p"${{ env.SESSION_KEY }}" "${{ runner.temp }}/encrypted_binaries.7z" ./Release/*.exe ./Release/checksums.txt
 
     - name: 📤 Upload Locked Artifact
@@ -53,7 +50,6 @@ jobs:
     runs-on: windows-latest
     steps:
     - name: 📥 Download Locked Artifact
-# Note: This creates a folder named 'locked-binaries' inside the destination
       uses: actions/download-artifact@v4
       with:
         name: locked-binaries
@@ -62,7 +58,7 @@ jobs:
     - name: 🛡️ YARA & BinSkim Audit
       shell: pwsh
       run: |
-        # 1. Create the audit directory and Unlock
+        # 1. Setup Directories and Unlock
         New-Item -ItemType Directory -Force -Path "$($env:RUNNER_TEMP)/audit"
         7z x -p"${{ env.SESSION_KEY }}" "$($env:RUNNER_TEMP)/encrypted_binaries.7z" -o"$($env:RUNNER_TEMP)/audit"
 
@@ -72,10 +68,13 @@ jobs:
         $rule = 'import "pe" rule Win32_Executable_Audit { condition: uint16(0) == 0x5A4D and pe.subsystem == pe.SUBSYSTEM_WINDOWS_GUI }'
         $rule | Set-Content -Path "$($env:RUNNER_TEMP)/audit.yar" -Encoding Ascii
 
-        # 3. Setup BinSkim
+        # 3. Setup BinSkim (Dynamic Path Discovery)
         Invoke-WebRequest -Uri "https://www.nuget.org/api/v2/package/Microsoft.CodeAnalysis.BinSkim/4.4.9" -OutFile "$($env:RUNNER_TEMP)/binskim.zip"
         Expand-Archive -Path "$($env:RUNNER_TEMP)/binskim.zip" -DestinationPath "$($env:RUNNER_TEMP)/binskim-bin" -Force
-        $binskimExe = "$($env:RUNNER_TEMP)/binskim-bin/tools/netcoreapp3.1/win-x64/BinSkim.exe"
+        
+        # Find the exe regardless of where it is in the package
+        $binskimExe = (Get-ChildItem -Path "$($env:RUNNER_TEMP)/binskim-bin" -Filter "BinSkim.exe" -Recurse | Select-Object -First 1).FullName
+        Write-Host "Found BinSkim at: $binskimExe"
 
         "### 🛡️ Heuristics & Hardening Report" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
         "| File | YARA Match | Status |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
@@ -85,7 +84,10 @@ jobs:
         foreach ($f in $files) {
             $yaraRes = & "$($env:RUNNER_TEMP)/yara-bin/yara64.exe" -m "$($env:RUNNER_TEMP)/audit.yar" $f.FullName
             $cleanYara = $yaraRes.Replace(" []", "").Trim()
+            
+            # Run BinSkim analyze
             & $binskimExe analyze $f.FullName --quiet
+            
             "| **$($f.Name)** | ``$cleanYara`` | ✅ HARDENED |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
         }
 
