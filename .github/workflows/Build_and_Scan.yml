@@ -8,7 +8,6 @@ on:
 
 env:
   SOLUTION_FILE_PATH: .
-  # Unique password for this specific run to lock intermediate artifacts
   SESSION_KEY: ${{ github.run_id }}-${{ github.run_number }}
 
 jobs:
@@ -19,14 +18,6 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: ⚠️ Legal & Safety Notice
-      shell: pwsh
-      run: |
-        "### 💀 CRITICAL SYSTEM NOTICE" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
-        "" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
-        "> [!CAUTION]" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
-        "> **USER BEWARE:** This autobuild is supplied without warranty. If the world ends, **it's not our fault.**" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
-
     - name: ➕ Add MSBuild to PATH
       uses: microsoft/setup-msbuild@v2
 
@@ -36,27 +27,16 @@ jobs:
         msbuild /m:8 /p:Configuration=Release ${{env.SOLUTION_FILE_PATH}}
         msbuild /m:8 /p:Configuration=ReleaseHidden ${{env.SOLUTION_FILE_PATH}}
 
-    - name: 🔍 Integrity Audit (SHA-256)
-      shell: pwsh
-      run: |
-        $exe1 = "Release\singleinstance.exe"
-        $exe2 = "Release\singleinstance_hidden.exe"
-        $h1 = (Get-FileHash $exe1 -Algorithm SHA256).Hash.ToLower()
-        $h2 = (Get-FileHash $exe2 -Algorithm SHA256).Hash.ToLower()
-        
-        "$h1  singleinstance.exe" | Set-Content -Path Release\checksums.txt -Encoding Ascii
-        "$h2  singleinstance_hidden.exe" | Add-Content -Path Release\checksums.txt
-
-        "### 🔒 Binary Integrity Report" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
-        "| File | SHA-256 Checksum |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
-        "| :--- | :--- |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
-        "| **singleinstance.exe** | ``$h1`` |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
-        "| **singleinstance_hidden.exe** | ``$h2`` |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
-
     - name: 🔒 Lock Intermediate Binaries
       shell: pwsh
       run: |
-        # Password protect the files for the internal handover
+        # Generate checksums before locking
+        $h1 = (Get-FileHash Release\singleinstance.exe -Algorithm SHA256).Hash.ToLower()
+        $h2 = (Get-FileHash Release\singleinstance_hidden.exe -Algorithm SHA256).Hash.ToLower()
+        "$h1  singleinstance.exe" | Set-Content -Path Release\checksums.txt -Encoding Ascii
+        "$h2  singleinstance_hidden.exe" | Add-Content -Path Release\checksums.txt
+
+        # Create the encrypted archive in the temp folder
         7z a -p"${{ env.SESSION_KEY }}" "${{ runner.temp }}/encrypted_binaries.7z" ./Release/*.exe ./Release/checksums.txt
 
     - name: 📤 Upload Locked Artifact
@@ -73,6 +53,7 @@ jobs:
     runs-on: windows-latest
     steps:
     - name: 📥 Download Locked Artifact
+# Note: This creates a folder named 'locked-binaries' inside the destination
       uses: actions/download-artifact@v4
       with:
         name: locked-binaries
@@ -81,8 +62,9 @@ jobs:
     - name: 🛡️ YARA & BinSkim Audit
       shell: pwsh
       run: |
-        # 1. Unlock files
-        7z x -p"${{ env.SESSION_KEY }}" "${{ runner.temp }}/locked-binaries/encrypted_binaries.7z" -o"${{ runner.temp }}/audit"
+        # 1. Create the audit directory and Unlock
+        New-Item -ItemType Directory -Force -Path "$($env:RUNNER_TEMP)/audit"
+        7z x -p"${{ env.SESSION_KEY }}" "$($env:RUNNER_TEMP)/encrypted_binaries.7z" -o"$($env:RUNNER_TEMP)/audit"
 
         # 2. Setup YARA
         Invoke-WebRequest -Uri "https://github.com/VirusTotal/yara/releases/download/v4.5.2/yara-v4.5.2-2326-win64.zip" -OutFile "$($env:RUNNER_TEMP)/yara.zip"
@@ -103,10 +85,7 @@ jobs:
         foreach ($f in $files) {
             $yaraRes = & "$($env:RUNNER_TEMP)/yara-bin/yara64.exe" -m "$($env:RUNNER_TEMP)/audit.yar" $f.FullName
             $cleanYara = $yaraRes.Replace(" []", "").Trim()
-            
-            # Run BinSkim check
             & $binskimExe analyze $f.FullName --quiet
-            
             "| **$($f.Name)** | ``$cleanYara`` | ✅ HARDENED |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
         }
 
@@ -124,9 +103,10 @@ jobs:
 
     - name: 🔓 Unlock for Final Scan
       run: |
-        7z x -p"${{ env.SESSION_KEY }}" "${{ runner.temp }}/locked-binaries/encrypted_binaries.7z" -o./final-build
+        mkdir -p ./final-build
+        7z x -p"${{ env.SESSION_KEY }}" "${{ runner.temp }}/encrypted_binaries.7z" -o./final-build
 
-    - name: 🔍 Verify Transfer Integrity
+    - name: 🔍 Integrity Verification
       working-directory: final-build
       run: |
         echo "### 📂 Cross-Platform Integrity Check" >> $GITHUB_STEP_SUMMARY
@@ -142,19 +122,9 @@ jobs:
       with:
         clamav_enable: true
         yara_enable: false
-        found_summary: true
-        statistics_summary: true
 
     - name: 🚀 FINAL RELEASE UPLOAD
       uses: actions/upload-artifact@v4
       with:
         name: singleinstance-FINAL-VERIFIED
         path: final-build/*
-
-    - name: 🏁 Final Clearance
-      run: |
-        echo "### ✅ Global Security Certification" >> $GITHUB_STEP_SUMMARY
-        echo "1. **Windows Build Engine:** Verified compiled output." >> $GITHUB_STEP_SUMMARY
-        echo "2. **YARA Audit:** Heuristic PE validation passed." >> $GITHUB_STEP_SUMMARY
-        echo "3. **BinSkim Audit:** Binary hardening (ASLR/DEP) verified." >> $GITHUB_STEP_SUMMARY
-        echo "4. **ClamAV Engine:** Signature-based malware scan passed." >> $GITHUB_STEP_SUMMARY
