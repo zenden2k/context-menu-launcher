@@ -57,7 +57,7 @@ jobs:
     - name: Upload Build Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: singleinstance-binary
+        name: singleinstance-binaries
         path: |
            ./Release/*.exe
            # Exclude the PDBs as discussed earlier to keep it clean
