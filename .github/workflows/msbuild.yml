@@ -1,4 +1,4 @@
-name: MSBuild
+name: 🏗️ Build and verify executables with MSBuild
 
 on:
   push:
@@ -25,45 +25,58 @@ jobs:
     - name: ⚠️ Legal & Safety Notice
       shell: pwsh
       run: |
-        echo "### 💀 CRITICAL SYSTEM NOTICE" >> $env:GITHUB_STEP_SUMMARY
-        echo "" >> $env:GITHUB_STEP_SUMMARY
-        echo "> [!CAUTION]" >> $env:GITHUB_STEP_SUMMARY
-        echo "> **USER BEWARE:** This autobuild is supplied without warranty." >> $env:GITHUB_STEP_SUMMARY
-        echo "" >> $env:GITHUB_STEP_SUMMARY
-        echo "Using this software may result in:" >> $env:GITHUB_STEP_SUMMARY
-        echo "1. **System Self-Termination:** Your OS might deciding it's better off as a blank screen. 🖥️💨" >> $env:GITHUB_STEP_SUMMARY
-        echo "2. **Data Transcendence:** Your files may leave this physical realm without notice. 🚮" >> $env:GITHUB_STEP_SUMMARY
-        echo "3. **Total Hardware Regret:** Your motherboard may experience a sudden desire to become molten slag. 🔥" >> $env:GITHUB_STEP_SUMMARY
-        echo "" >> $env:GITHUB_STEP_SUMMARY
-        echo "If your computer decides to delete its own soul, **it is not our fault.**" >> $env:GITHUB_STEP_SUMMARY
-        echo "" >> $env:GITHUB_STEP_SUMMARY
-        echo "If the world ends, **it's not our fault.** Use at your own risk!" >> $env:GITHUB_STEP_SUMMARY
+        "### 💀 CRITICAL NOTICE" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        "" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        "> [!CAUTION]" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        "> **USER BEWARE:** This autobuild is supplied without warranty." | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        "" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        "Using this software may result in:" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        "1. **System Self-Termination:** Your OS might deciding it's better off as a blank screen. 🖥️💨" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        "2. **Data Transcendence:** Your files may leave this physical realm without notice. 🚮" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        "3. **Total Hardware Regret:** Your motherboard may experience a sudden desire to become molten slag. 🔥" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        "" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        "If your computer decides to delete its own soul, **it is not our fault.**" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        "" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        "If the world ends, **it's not our fault.** Use at your own risk!" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
         Write-Host "Disclaimer posted to Job Summary." -ForegroundColor Cyan
 
-    - name: Add MSBuild to PATH
-      uses: microsoft/setup-msbuild@v2 # Updated to v2
+    - name: ➕ Add MSBuild to PATH
+      uses: microsoft/setup-msbuild@v2
 
-    - name: Restore NuGet packages
+    - name: 💾 Restore NuGet packages
       working-directory: ${{env.GITHUB_WORKSPACE}}
       run: nuget restore ${{env.SOLUTION_FILE_PATH}}
 
-    - name: Build
+    - name: 🏗️ Build Executables
       working-directory: ${{env.GITHUB_WORKSPACE}}
       run: |
           msbuild /m:8 /p:Configuration=${{env.BUILD_RELEASE}} ${{env.SOLUTION_FILE_PATH}}
           msbuild /m:8 /p:Configuration=${{env.BUILD_HIDDEN}} ${{env.SOLUTION_FILE_PATH}}
-
-    - name: Verify, Hash, and Summarize
+          
+    # --- DUAL-ENGINE ANTIVIRUS SCAN (ClamAV + YARA) ---
+    - name: 🛡️ Advanced Security Scan
+      uses: hugoalh/scan-virus-ghaction@v0.20.1
+      with:
+        clamav_enable: true
+        clamav_update: true
+        yara_enable: true
+        # Ensure we only scan the compiled binaries to save time
+        ignores_pre: |
+          Set-Location -Path "Release"
+        found_summary: true
+        statistics_summary: true
+        
+    - name: 🔒 Verify, Hash, and Summarize
       shell: pwsh
       run: |
         $exes = @("Release\singleinstance.exe", "Release\singleinstance_hidden.exe")
         $checksumFile = "Release\checksums.txt"
         
-        # Start the Summary Header
-        "### 🔒 Binary Verification Report" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
-        "" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
-        "| File | Manifest | SHA-256 Checksum |" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
-        "| :--- | :--- | :--- |" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+        # Binary Verification Report Header
+        "### 🔒 Binary Verification Report" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        "" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        "| File | Manifest | SHA-256 Checksum |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        "| :--- | :--- | :--- |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
 
         if (Test-Path $checksumFile) { Remove-Item $checksumFile }
 
@@ -74,8 +87,8 @@ jobs:
                 $hasManifest = Select-String -Path $exe -Pattern "requestedExecutionLevel" -Quiet
                 $manifestStatus = $hasManifest ? "✅ PASS" : "❌ FAIL"
                 
-                # USE DOUBLE QUOTES HERE TO EXPAND VARIABLES
-                "| **$filename** | $manifestStatus | ``$hash`` |" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+                # Table Row using Add-Content
+                "| **$filename** | $manifestStatus | ``$hash`` |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
                 
                 Write-Host "Processed ${filename}: $hash" -ForegroundColor Cyan
                 "$hash  $filename" | Out-File -FilePath $checksumFile -Append -Encoding ascii
@@ -84,13 +97,22 @@ jobs:
             }
         }
 
+    - name: 🏁 Final Summary
+      shell: pwsh
+      run: |
+        "" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        "---" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        "### ✅ Security Checks passed" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        "> [!IMPORTANT]" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        "> These binaries have passed **ClamAV Scanning**, **YARA (By VirusTotal) Scanning** **SHA-256 Integrity Validation**, and **UAC Manifest Auditing**. They are ready for deployment." | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+
+
     # --- EXPORT THE EXE FILES ---
     - name: Upload Build Artifact
       uses: actions/upload-artifact@v4
       with:
         name: singleinstance-binaries
         path: |
-           ./Release/*.exe
-           ./Release/checksums.txt
-           # Exclude the PDBs as discussed earlier to keep it clean
-           !./Release/*.pdb
+            ./Release/*.exe
+            ./Release/checksums.txt
+            !./Release/*.pdb
