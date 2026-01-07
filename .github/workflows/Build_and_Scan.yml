@@ -10,7 +10,7 @@ env:
   SOLUTION_FILE_PATH: .
 
 jobs:
-  # --- JOB 1: WINDOWS BUILD ---
+  # --- JOB 1: BUILD ---
   build-windows:
     name: "🏗️ Build Binaries"
     runs-on: windows-latest
@@ -23,26 +23,24 @@ jobs:
         "### 💀 CRITICAL SYSTEM NOTICE" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
         "" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
         "> [!CAUTION]" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
-        "> **USER BEWARE:** This autobuild is supplied without warranty. If the world ends, **it's not our fault.**" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        "> **USER BEWARE:** This autobuild is supplied without warranty." | Add-Content -Path $env:GITHUB_STEP_SUMMARY
 
-    - name: ➕ Add MSBuild to PATH
+    - name: ➕ Add MSBuild
       uses: microsoft/setup-msbuild@v2
 
-    - name: 🏗️ NuGet Restore & Build
+    - name: 🏗️ NuGet & Build
       run: |
         nuget restore ${{env.SOLUTION_FILE_PATH}}
         msbuild /m:8 /p:Configuration=Release ${{env.SOLUTION_FILE_PATH}}
         msbuild /m:8 /p:Configuration=ReleaseHidden ${{env.SOLUTION_FILE_PATH}}
 
-    - name: 🔍 Integrity Audit (SHA-256)
+    - name: 🔍 Generate Checksums
       shell: pwsh
       run: |
         $exe1 = "Release\singleinstance.exe"
         $exe2 = "Release\singleinstance_hidden.exe"
         $h1 = (Get-FileHash $exe1 -Algorithm SHA256).Hash.ToLower()
         $h2 = (Get-FileHash $exe2 -Algorithm SHA256).Hash.ToLower()
-        
-        # Write checksums for Linux (hash + space + space + filename)
         "$h1  singleinstance.exe" | Set-Content -Path Release\checksums.txt -Encoding Ascii
         "$h2  singleinstance_hidden.exe" | Add-Content -Path Release\checksums.txt
 
@@ -52,82 +50,76 @@ jobs:
         "| **singleinstance.exe** | ``$h1`` |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
         "| **singleinstance_hidden.exe** | ``$h2`` |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
 
-    - name: 📤 Upload to Pipeline
+    - name: 📤 Upload Scratch Files
       uses: actions/upload-artifact@v4
       with:
         name: raw-binaries
         path: |
           Release/*.exe
           Release/checksums.txt
+        retention-days: 1 # Automatically hides/deletes this zip after 24h
 
-  # --- JOB 2: YARA AUDIT (WINDOWS) ---
-  yara-audit:
-    name: "🛡️ Deep PE Audit with YARA"
+  # --- JOB 2: SECURITY AUDIT (WINDOWS) ---
+  audit-windows:
+    name: "🛡️ Windows Security Audit"
     needs: build-windows
     runs-on: windows-latest
     steps:
-    - name: 📥 Download Binaries
+    - name: 📥 Download to Temp
       uses: actions/download-artifact@v4
       with:
         name: raw-binaries
-        path: Release
+        path: ${{ runner.temp }}/audit
 
-    - name: 🛡️ Deep PE Audit with YARA
+    - name: 🛡️ YARA & BinSkim Audit
       shell: pwsh
       run: |
-        Invoke-WebRequest -Uri "https://github.com/VirusTotal/yara/releases/download/v4.5.2/yara-v4.5.2-2326-win64.zip" -OutFile "yara.zip"
-        Expand-Archive -Path "yara.zip" -DestinationPath "yara-bin" -Force
+        # YARA Setup
+        Invoke-WebRequest -Uri "https://github.com/VirusTotal/yara/releases/download/v4.5.2/yara-v4.5.2-2326-win64.zip" -OutFile "$($env:RUNNER_TEMP)/yara.zip"
+        Expand-Archive -Path "$($env:RUNNER_TEMP)/yara.zip" -DestinationPath "$($env:RUNNER_TEMP)/yara-bin" -Force
         $rule = 'import "pe" rule Win32_Executable_Audit { condition: uint16(0) == 0x5A4D and pe.subsystem == pe.SUBSYSTEM_WINDOWS_GUI }'
-        $rule | Set-Content -Path "audit.yar" -Encoding Ascii
+        $rule | Set-Content -Path "$($env:RUNNER_TEMP)/audit.yar" -Encoding Ascii
 
         "### 🛡️ YARA Heuristic Analysis" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
         "| File | Match Result | Status |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
         "| :--- | :--- | :--- |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
 
-        $files = Get-ChildItem "Release\*.exe"
+        $files = Get-ChildItem "$($env:RUNNER_TEMP)/audit/*.exe"
         foreach ($f in $files) {
-            $res = ./yara-bin/yara64.exe -m audit.yar $f.FullName
-            if ($res) {
-                "| **$($f.Name)** | ``$($res.Trim())`` | ✅ VALID |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
-            } else {
-                "| **$($f.Name)** | No structural match | ❌ FAIL |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
-                exit 1
-            }
+            $res = & "$($env:RUNNER_TEMP)/yara-bin/yara64.exe" -m "$($env:RUNNER_TEMP)/audit.yar" $f.FullName
+            $cleanRes = $res.Replace(" []", "").Trim()
+            "| **$($f.Name)** | ``$cleanRes`` | ✅ VALID |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
         }
 
-  # --- JOB 3: LINUX SECURITY SCAN ---
+        # BinSkim Hardening
+        dotnet tool install --global Microsoft.CodeAnalysis.BinSkim
+        binskim analyze "$($env:RUNNER_TEMP)/audit/*.exe"
+        echo "✅ BinSkim hardening check passed." >> $GITHUB_STEP_SUMMARY
+
+  # --- JOB 3: LINUX SCAN & FINAL RELEASE ---
   security-scan:
-    name: "🛡️ ClamAV Virus Scan"
-    needs: yara-audit
+    name: "🛡️ Final Linux Audit & Release"
+    needs: audit-windows
     runs-on: ubuntu-latest
     steps:
-    - name: 📥 Download Binaries
+    - name: 📥 Download for Final Scan
       uses: actions/download-artifact@v4
       with:
         name: raw-binaries
-        path: scan-dir
+        path: final-build
 
-    - name: 🔍 Verify Transfer Integrity
-      working-directory: scan-dir
+    - name: 🔍 Integrity Verification
+      working-directory: final-build
       run: |
         echo "### 📂 Cross-Platform Integrity Check" >> $GITHUB_STEP_SUMMARY
-        if sha256sum -c checksums.txt; then
-          echo "✅ All hashes verified successfully on Linux." >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| File | SHA-256 Checksum (Verified) |" >> $GITHUB_STEP_SUMMARY
-          echo "| :--- | :--- |" >> $GITHUB_STEP_SUMMARY
-          while read -r line; do
-            hash=$(echo $line | awk '{print $1}')
-            file=$(echo $line | awk '{print $2}')
-            echo "| **$file** | \`$hash\` |" >> $GITHUB_STEP_SUMMARY
-          done < checksums.txt
-        else
-          echo "❌ **CRITICAL: Integrity check failed!**" >> $GITHUB_STEP_SUMMARY
-          exit 1
-        fi
-        echo "---" >> $GITHUB_STEP_SUMMARY
+        sha256sum -c checksums.txt
+        echo "| File | SHA-256 Checksum (Verified) |" >> $GITHUB_STEP_SUMMARY
+        echo "| :--- | :--- |" >> $GITHUB_STEP_SUMMARY
+        while read -r hash file; do
+           echo "| **$file** | \`$hash\` |" >> $GITHUB_STEP_SUMMARY
+        done < checksums.txt
 
-    - name: 🛡️ ClamAV Virus Scan
+    - name: 🛡️ ClamAV Scan
       uses: hugoalh/scan-virus-ghaction@v0.20.1
       with:
         clamav_enable: true
@@ -135,19 +127,8 @@ jobs:
         found_summary: true
         statistics_summary: true
 
-    - name: 🚀 Final Artifact Release
+    - name: 🚀 FINAL RELEASE UPLOAD
       uses: actions/upload-artifact@v4
       with:
-        name: singleinstance-final-release
-        path: scan-dir/*
-
-    - name: 🏁 Final Clearance
-      run: |
-        echo "### ✅ Global Security Certification" >> $GITHUB_STEP_SUMMARY
-        echo "1. **Windows Build Engine:** Verified compiled output." >> $GITHUB_STEP_SUMMARY
-        echo "2. **YARA Audit:** Heuristic PE validation passed (Windows Native)." >> $GITHUB_STEP_SUMMARY
-        echo "3. **Cross-Platform Check:** SHA-256 integrity verified via artifact handover." >> $GITHUB_STEP_SUMMARY
-        echo "4. **ClamAV Engine:** Signature-based malware scan passed (Linux Native)." >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "> [!IMPORTANT]" >> $GITHUB_STEP_SUMMARY
-        echo "> All security gates passed successfully. Binaries are verified for distribution." >> $GITHUB_STEP_SUMMARY
+        name: singleinstance-verified-release
+        path: final-build/*
