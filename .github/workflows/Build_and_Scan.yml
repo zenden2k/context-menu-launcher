@@ -52,33 +52,56 @@ jobs:
         "| **singleinstance.exe** | ``$h1`` |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
         "| **singleinstance_hidden.exe** | ``$h2`` |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
 
-    - name: 🛡️ Deep PE Audit (YARA)
+   # --- JOB 2: YARA AUDIT (WINDOWS) ---
+  yara-audit:
+    name: "🛡️ YARA Audit"
+    needs: build-windows
+    runs-on: windows-latest
+    steps:
+    - name: 📥 Download Binaries
+      uses: actions/download-artifact@v4
+      with:
+        name: raw-binaries
+        path: Release
+
+    - name: 🔍 Integrity Audit (SHA-256)
       shell: pwsh
       run: |
-        # Setup YARA
+        $exe1 = "Release\singleinstance.exe"
+        $exe2 = "Release\singleinstance_hidden.exe"
+        $h1 = (Get-FileHash $exe1 -Algorithm SHA256).Hash.ToLower()
+        $h2 = (Get-FileHash $exe2 -Algorithm SHA256).Hash.ToLower()
+        
+        # Write checksums for Linux (hash + space + space + filename)
+        "$h1  singleinstance.exe" | Set-Content -Path Release\checksums.txt -Encoding Ascii
+        "$h2  singleinstance_hidden.exe" | Add-Content -Path Release\checksums.txt
+
+        "### 🔒 Binary Integrity Report" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        "| File | SHA-256 Checksum |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        "| :--- | :--- |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        "| **singleinstance.exe** | ``$h1`` |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        "| **singleinstance_hidden.exe** | ``$h2`` |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY   
+
+    - name: 🛡️ Deep PE Audit with YARA
+      shell: pwsh
+      run: |
         Invoke-WebRequest -Uri "https://github.com/VirusTotal/yara/releases/download/v4.5.2/yara-v4.5.2-2326-win64.zip" -OutFile "yara.zip"
         Expand-Archive -Path "yara.zip" -DestinationPath "yara-bin" -Force
-        
-        # Create Rule
         $rule = 'import "pe" rule Win32_Executable_Audit { condition: uint16(0) == 0x5A4D and pe.subsystem == pe.SUBSYSTEM_WINDOWS_GUI }'
         $rule | Set-Content -Path "audit.yar" -Encoding Ascii
 
-        # Report Header
         "### 🛡️ YARA Heuristic Analysis" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
         "| File | Match Result | Status |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
         "| :--- | :--- | :--- |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
 
-        $files = @("Release\singleinstance.exe", "Release\singleinstance_hidden.exe")
+        $files = Get-ChildItem "Release\*.exe"
         foreach ($f in $files) {
-            $name = Split-Path $f -Leaf
-            if (Test-Path $f) {
-                $res = ./yara-bin/yara64.exe -m audit.yar $f
-                if ($res) {
-                    "| **$name** | ``$($res.Trim())`` | ✅ VALID |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
-                } else {
-                    "| **$name** | No structural match | ❌ FAIL |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
-                    exit 1
-                }
+            $res = ./yara-bin/yara64.exe -m audit.yar $f.FullName
+            if ($res) {
+                "| **$($f.Name)** | ``$($res.Trim())`` | ✅ VALID |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+            } else {
+                "| **$($f.Name)** | No structural match | ❌ FAIL |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+                exit 1
             }
         }
 
@@ -93,7 +116,7 @@ jobs:
   # --- JOB 2: LINUX SECURITY SCAN ---
   security-scan:
     name: "🛡️ Security Audit (Linux 🐧)"
-    needs: build-windows
+    needs: yara-audit
     runs-on: ubuntu-latest
     steps:
     - name: 📥 Download Binaries
@@ -107,9 +130,22 @@ jobs:
       run: |
         echo "### 📂 Cross-Platform Integrity Check" >> $GITHUB_STEP_SUMMARY
         if sha256sum -c checksums.txt; then
-          echo "✅ Integrity check passed." >> $GITHUB_STEP_SUMMARY
+          echo "✅ All hashes verified successfully on Linux." >> $GITHUB_STEP_SUMMARY
+          
+          # 2. Generate the matching report table
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| File | SHA-256 Checksum (Verified) |" >> $GITHUB_STEP_SUMMARY
+          echo "| :--- | :--- |" >> $GITHUB_STEP_SUMMARY
+          
+          # Read the checksums file and format into table rows
+          while read -r line; do
+            hash=$(echo $line | awk '{print $1}')
+            file=$(echo $line | awk '{print $2}')
+            echo "| **$file** | \`$hash\` |" >> $GITHUB_STEP_SUMMARY
+          done < checksums.txt
+          
         else
-          echo "❌ Integrity check failed!" >> $GITHUB_STEP_SUMMARY
+          echo "❌ **CRITICAL: Integrity check failed!** The files may have been corrupted during transfer." >> $GITHUB_STEP_SUMMARY
           exit 1
         fi
         echo "---" >> $GITHUB_STEP_SUMMARY
