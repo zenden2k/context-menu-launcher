@@ -8,7 +8,8 @@ on:
 
 env:
   SOLUTION_FILE_PATH: .
-  BUILD_CONFIGURATION: Release
+  BUILD_RELEASE: Release
+  BUILD_HIDDEN: ReleaseHidden
 
 permissions:
   contents: read
@@ -31,7 +32,7 @@ jobs:
         echo "" >> $env:GITHUB_STEP_SUMMARY
         echo "Using this software may result in:" >> $env:GITHUB_STEP_SUMMARY
         echo "1. **System Self-Termination:** Your OS might deciding it's better off as a blank screen. 🖥️💨" >> $env:GITHUB_STEP_SUMMARY
-        echo "2. **Data Transcendence:** Your files may leave this physical realm without notice. 🕊️" >> $env:GITHUB_STEP_SUMMARY
+        echo "2. **Data Transcendence:** Your files may leave this physical realm without notice. 🚮" >> $env:GITHUB_STEP_SUMMARY
         echo "3. **Total Hardware Regret:** Your motherboard may experience a sudden desire to become molten slag. 🔥" >> $env:GITHUB_STEP_SUMMARY
         echo "" >> $env:GITHUB_STEP_SUMMARY
         echo "If your computer decides to delete its own soul, **it is not our fault.**" >> $env:GITHUB_STEP_SUMMARY
@@ -48,7 +49,9 @@ jobs:
 
     - name: Build
       working-directory: ${{env.GITHUB_WORKSPACE}}
-      run: msbuild /m /p:Configuration=${{env.BUILD_CONFIGURATION}} ${{env.SOLUTION_FILE_PATH}}
+      run: |
+          msbuild /m:8 /p:Configuration=${{env.BUILD_RELEASE}} ${{env.SOLUTION_FILE_PATH}}
+          msbuild /m:8 /p:Configuration=${{env.BUILD_HIDDEN}} ${{env.SOLUTION_FILE_PATH}}
 
     # --- EXPORT THE EXE ---
     - name: Upload Build Artifact
