@@ -102,14 +102,10 @@ jobs:
       uses: hugoalh/scan-virus-ghaction@v0.20.1
       with:
         clamav_enable: true
-        yara_enable: true
+        # Yara is slightly broken under Git Actions, we use the windows version above to test.
+        yara_enable: false
         found_summary: true
         statistics_summary: true
-        # We target the specific symbols causing the exit code 1
-        # These relate to modules that cannot function under GitHub Actions
-        # These are covered by the YARA Windows scan.
-        ignores_post: |
-          $input.Symbol -eq 'extension' -or $input.Symbol -eq 'filename'
 
     - name: 🛡️ Microsoft Defender Scan (Linux)
       uses: jbrotsos/jbro-test-ghaction@v1
