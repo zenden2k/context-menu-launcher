@@ -16,6 +16,11 @@ Windows Registry Editor Version 5.00
 [HKEY_CLASSES_ROOT\SystemFileAssociations\.txt\Shell\p4merge\Command]
 @="\"d:\\singleinstance.exe\" %1 \"C:\\Program Files\\Perforce\\p4merge.exe\" $files --si-timeout 400"
 
+OR
+
+[HKEY_CLASSES_ROOT\SystemFileAssociations\.txt\Shell\p4merge\Command]
+@="\"d:\\singleinstance_hidden.exe\" %1 \"C:\\Program Files\\Perforce\\p4merge.exe\" $files --si-timeout 400"
+
 */
 #include <Shellapi.h>
 #include <atomic>
@@ -52,10 +57,26 @@ DWORD timeout = 400; // ms
 enum { TIMER_ID = 1 };
 LPTSTR *szArgList;
 int argCount;
-CLimitSingleInstance singleInstance(TEXT("Global\\{C30D92DD-DEE6-41A1-8907-B42FBE58C8A6}"));
+
+// Give each version a unique name and UUID
+#ifdef BUILD_HIDDEN_VERSION
+    #define EXE_NAME L"singleinstance_hidden.exe"
+    #define APP_TITLE L"singleinstance (Hidden)"
+    // Unique UUID for the Hidden version
+    CLimitSingleInstance singleInstance(TEXT("Global\\{C30D92DD-DEE6-41A1-8907-B42FBE58C8A7}"));
+    // Unique Window Class so they don't talk to each other
+    TCHAR szWindowClass[256] = _T("SingleInstanceHidden_WindowClass");
+#else
+    #define EXE_NAME L"singleinstance.exe"
+    #define APP_TITLE L"singleinstance"
+    // Original UUID for the Regular version
+    CLimitSingleInstance singleInstance(TEXT("Global\\{C30D92DD-DEE6-41A1-8907-B42FBE58C8A6}"));
+    // Original Window Class
+    TCHAR szWindowClass[256] = _T("SingleInstance_WindowClass");
+#endif
+
 std::vector<std::wstring> files;
 HINSTANCE hInst;                                // current instance
-TCHAR szWindowClass[256] = _T("SingleInstance_WindowClass");            // the main window class name
 
 // Forward declarations of functions included in this code module:
 ATOM                MyRegisterClass(HINSTANCE hInstance);
@@ -100,10 +121,13 @@ int APIENTRY _tWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
         if (argCount > 3) {
             files.push_back(szArgList[1]);
         } else {
-            MessageBox(0, L"Usage: singleinstance.exe \"%1\" <command> $files [arguments]\r\n\r\n"
-                L"Optional arguments for singleinstance (not passed to command):\r\n"
-                L"--si-timeout <time to wait in msecs>"
-                , _T("singleinstance"), 0);
+			std::wstring usageText = L"Usage: ";
+            usageText += EXE_NAME;
+            usageText += L" \"%1\" <command> $files [arguments]\r\n\r\n"
+                         L"Optional arguments for singleinstance (not passed to command):\r\n"
+                         L"--si-timeout <time to wait in msecs>";
+
+            MessageBox(0, usageText.c_str(), APP_TITLE, 0);
             return 0;
         }
     }
@@ -211,33 +235,98 @@ void ArgvQuote(const std::wstring& Argument, std::wstring& CommandLine, bool For
     }
     CommandLine.push_back(L' ');
 }
+#ifdef BUILD_HIDDEN_VERSION
+	// This launches the .exe using CreateProcessW instead of ShellExecute, it creates a fully hidden console.
+	void LaunchApp() {
+		// szArgList[2] is our target app (e.g., py.exe)
+		std::wstring targetApp = szArgList[2];
+		
+		// Build the full command line string
+		std::wstring fullCmdLine = L"\"" + targetApp + L"\" ";
+		
+		std::wstring argsPart;
+		for (int i = 3; i < argCount; i++) {
+			std::wstring argStr = szArgList[i];
+			std::size_t found = argStr.find(L"$files");
+			
+			if (found != std::string::npos) {
+				std::wstring tmpstr;
+				for (const auto& file : files) {
+					ArgvQuote(file, tmpstr, true, true);
+				}
+				argStr = std::regex_replace(argStr, std::wregex(L"\\$files"), tmpstr);
+				argsPart.append(argStr);
+			} else if (argStr == L"--si-timeout") {
+				i++; // skip the timeout value
+			} else {
+				ArgvQuote(argStr, argsPart, true, false);
+			}
+		}
+		
+		fullCmdLine.append(argsPart);
 
-void LaunchApp() {
-    std::wstring cmdLine;
-   
-    for (int i = 3; i < argCount; i++) {
-        std::wstring argStr = szArgList[i];
-        std::size_t found = argStr.find(L"$files");
-        if (found!=std::string::npos) {
-            std::wstring tmpstr;
-            for (const auto& file : files) {
-                ArgvQuote(file, tmpstr, true, true);
-            }
-            argStr = std::regex_replace(argStr, std::wregex(L"\\$files"), tmpstr);
-            cmdLine.append(argStr);
-        } else if (argStr == L"--si-timeout") {
-            i++; // skip
-        } else {
-            ArgvQuote(argStr, cmdLine, true, false);
-        }
-    }
-    // MessageBox(0, cmdLine.c_str(), szArgList[2], 0);
-    HINSTANCE hinst =  ShellExecute(0, _T("open"), szArgList[2], cmdLine.c_str(), 0, SW_SHOWNORMAL);
-    if (reinterpret_cast<int>(hinst) <= 32) {
-        TCHAR buffer[256];
-        wsprintf(buffer, _T("ShellExecute failed. Error code=%d"), reinterpret_cast<int>(hinst));
-    }
-}
+		// Prepare CreateProcess structures
+		STARTUPINFOW si;
+		PROCESS_INFORMATION pi;
+		ZeroMemory(&si, sizeof(si));
+		si.cb = sizeof(si);
+		ZeroMemory(&pi, sizeof(pi));
+		
+		// Optional: Debugging for failed launches
+		// MessageBox(0, fullCmdLine.c_str(), L"Debug Hidden Command", 0);
+		
+		// Launch with CREATE_NO_WINDOW (0x08000000)
+		// This forces the console-less environment that stops flashes from console applications
+		BOOL success = CreateProcessW(
+			NULL,               // No module name (taken from command line)
+			&fullCmdLine[0],    // Mutable command line buffer
+			NULL,               // Process handle not inheritable
+			NULL,               // Thread handle not inheritable
+			FALSE,              // Set handle inheritance to FALSE
+			0x08000000,         // CREATE_NO_WINDOW flag
+			NULL,               // Use parent's environment block
+			NULL,               // Use parent's starting directory 
+			&si,                // Pointer to STARTUPINFO
+			&pi                 // Pointer to PROCESS_INFORMATION
+		);
+
+		if (success) {
+			// We don't need to wait for the app, so close handles to avoid leaks
+			CloseHandle(pi.hProcess);
+			CloseHandle(pi.hThread);
+		} else {
+			// Optional: Debugging for failed launches
+			// DWORD err = GetLastError();
+		}
+	}
+#else
+	void LaunchApp() {
+		std::wstring cmdLine;
+	   
+		for (int i = 3; i < argCount; i++) {
+			std::wstring argStr = szArgList[i];
+			std::size_t found = argStr.find(L"$files");
+			if (found!=std::string::npos) {
+				std::wstring tmpstr;
+				for (const auto& file : files) {
+					ArgvQuote(file, tmpstr, true, true);
+				}
+				argStr = std::regex_replace(argStr, std::wregex(L"\\$files"), tmpstr);
+				cmdLine.append(argStr);
+			} else if (argStr == L"--si-timeout") {
+				i++; // skip
+			} else {
+				ArgvQuote(argStr, cmdLine, true, false);
+			}
+		}
+		// MessageBox(0, cmdLine.c_str(), szArgList[2], 0);
+		HINSTANCE hinst =  ShellExecute(0, _T("open"), szArgList[2], cmdLine.c_str(), 0, SW_SHOWNORMAL);
+		if (reinterpret_cast<int>(hinst) <= 32) {
+			TCHAR buffer[256];
+			wsprintf(buffer, _T("ShellExecute failed. Error code=%d"), reinterpret_cast<int>(hinst));
+		}
+	}
+#endif	
 
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {

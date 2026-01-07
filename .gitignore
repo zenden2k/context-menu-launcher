@@ -13,8 +13,10 @@ ipch/
 
 # --- Build Output Directories ---
 # Ignore the folders entirely rather than just the file extensions
-Debug/
 Release/
+Debug/
+singleinstance/Release/
+singleinstance/ReleaseHidden/
 x64/
 Win32/
 bin/
