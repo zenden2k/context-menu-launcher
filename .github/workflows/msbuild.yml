@@ -25,19 +25,19 @@ jobs:
     - name: ⚠️ Legal & Safety Notice
       shell: pwsh
       run: |
-        echo "### 💀 CRITICAL SYSTEM NOTICE" >> $env:GITHUB_STEP_SUMMARY -Append
-        echo "" >> $env:GITHUB_STEP_SUMMARY -Append
-        echo "> [!CAUTION]" >> $env:GITHUB_STEP_SUMMARY -Append
-        echo "> **USER BEWARE:** This autobuild is supplied without warranty." >> $env:GITHUB_STEP_SUMMARY -Append
-        echo "" >> $env:GITHUB_STEP_SUMMARY -Append
-        echo "Using this software may result in:" >> $env:GITHUB_STEP_SUMMARY -Append
-        echo "1. **System Self-Termination:** Your OS might deciding it's better off as a blank screen. 🖥️💨" >> $env:GITHUB_STEP_SUMMARY -Append
-        echo "2. **Data Transcendence:** Your files may leave this physical realm without notice. 🚮" >> $env:GITHUB_STEP_SUMMARY -Append
-        echo "3. **Total Hardware Regret:** Your motherboard may experience a sudden desire to become molten slag. 🔥" >> $env:GITHUB_STEP_SUMMARY -Append
-        echo "" >> $env:GITHUB_STEP_SUMMARY -Append
-        echo "If your computer decides to delete its own soul, **it is not our fault.**" >> $env:GITHUB_STEP_SUMMARY -Append
-        echo "" >> $env:GITHUB_STEP_SUMMARY -Append
-        echo "If the world ends, **it's not our fault.** Use at your own risk!" >> $env:GITHUB_STEP_SUMMARY -Append
+        echo "### 💀 CRITICAL SYSTEM NOTICE" >> $env:GITHUB_STEP_SUMMARY
+        echo "" >> $env:GITHUB_STEP_SUMMARY
+        echo "> [!CAUTION]" >> $env:GITHUB_STEP_SUMMARY
+        echo "> **USER BEWARE:** This autobuild is supplied without warranty." >> $env:GITHUB_STEP_SUMMARY
+        echo "" >> $env:GITHUB_STEP_SUMMARY
+        echo "Using this software may result in:" >> $env:GITHUB_STEP_SUMMARY
+        echo "1. **System Self-Termination:** Your OS might deciding it's better off as a blank screen. 🖥️💨" >> $env:GITHUB_STEP_SUMMARY
+        echo "2. **Data Transcendence:** Your files may leave this physical realm without notice. 🚮" >> $env:GITHUB_STEP_SUMMARY
+        echo "3. **Total Hardware Regret:** Your motherboard may experience a sudden desire to become molten slag. 🔥" >> $env:GITHUB_STEP_SUMMARY
+        echo "" >> $env:GITHUB_STEP_SUMMARY
+        echo "If your computer decides to delete its own soul, **it is not our fault.**" >> $env:GITHUB_STEP_SUMMARY
+        echo "" >> $env:GITHUB_STEP_SUMMARY
+        echo "If the world ends, **it's not our fault.** Use at your own risk!" >> $env:GITHUB_STEP_SUMMARY
         Write-Host "Disclaimer posted to Job Summary." -ForegroundColor Cyan
 
     - name: Add MSBuild to PATH
@@ -59,8 +59,9 @@ jobs:
         $exes = @("Release\singleinstance.exe", "Release\singleinstance_hidden.exe")
         $checksumFile = "Release\checksums.txt"
         
-        # Start the Summary Header
+        # Start the Summary Header with a blank line for Markdown compliance
         "### 🔒 Binary Verification Report" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+        "" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
         "| File | Manifest | SHA-256 Checksum |" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
         "| :--- | :--- | :--- |" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
 
@@ -73,22 +74,21 @@ jobs:
                 $hasManifest = Select-String -Path $exe -Pattern "requestedExecutionLevel" -Quiet
                 $manifestStatus = $hasManifest ? "✅ PASS" : "❌ FAIL"
                 
-                # 1. Write to the Job Summary (Fixed interpolation)
-                "| **${filename}** | $manifestStatus | `$hash` |" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+                # 1. Write to the Job Summary (Using explicit quotes and braces)
+                "| **${filename}** | ${manifestStatus} | `${hash}` |" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
                 
-                # 2. Write to the logs (Fixed interpolation)
-                Write-Host "Processed ${filename}: $hash" -ForegroundColor Cyan
+                # 2. Write to the logs
+                Write-Host "Processed ${filename}: ${hash}" -ForegroundColor Cyan
                 
                 # 3. Write to the checksums.txt
-                "$hash  $filename" | Out-File -FilePath $checksumFile -Append -Encoding ascii
+                "${hash}  ${filename}" | Out-File -FilePath $checksumFile -Append -Encoding ascii
                 
                 if (-not $hasManifest) { 
                     Write-Error "Manifest missing in $filename"
                     exit 1 
                 }
             }
-        }
-        Write-Host "Checksums.txt created in Release folder." -ForegroundColor Green  
+        } 
 
     # --- EXPORT THE EXE FILES ---
     - name: Upload Build Artifact
