@@ -55,12 +55,20 @@ jobs:
     - name: 🔍 Deep PE Audit (YARA Win64)
       shell: pwsh
       run: |
+        # 1. Download and Extract YARA
         Invoke-WebRequest -Uri "https://github.com/VirusTotal/yara/releases/download/v4.5.2/yara-v4.5.2-2326-win64.zip" -OutFile "yara.zip"
-        Expand-Archive -Path "yara.zip" -DestinationPath "yara-bin"
-        $rule = "import 'pe'`nrule Win32_Executable_Audit { condition: uint16(0) == 0x5A4D and pe.subsystem == pe.SUBSYSTEM_WINDOWS_GUI }"
-        $rule | Out-File -FilePath "audit.yar" -Encoding ascii
+        Expand-Archive -Path "yara.zip" -DestinationPath "yara-bin" -Force
+        
+        # 2. Create the rule file with strict ASCII encoding
+        # Using a simple here-string and Set-Content to avoid encoding issues
+        $rule = 'import "pe" rule Win32_Executable_Audit { condition: uint16(0) == 0x5A4D and pe.subsystem == pe.SUBSYSTEM_WINDOWS_GUI }'
+        $rule | Set-Content -Path "audit.yar" -Encoding Ascii
+
+        # 3. Run the scan
+        Write-Host "Starting Deep PE Audit..." -ForegroundColor Cyan
         ./yara-bin/yara64.exe -m audit.yar Release/singleinstance.exe
         ./yara-bin/yara64.exe -m audit.yar Release/singleinstance_hidden.exe
+        
         "✅ Deep PE Audit Complete (YARA 4.5.2)" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
 
     - name: 📤 Upload Binaries for Linux Scan
