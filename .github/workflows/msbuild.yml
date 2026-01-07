@@ -53,7 +53,22 @@ jobs:
           msbuild /m:8 /p:Configuration=${{env.BUILD_RELEASE}} ${{env.SOLUTION_FILE_PATH}}
           msbuild /m:8 /p:Configuration=${{env.BUILD_HIDDEN}} ${{env.SOLUTION_FILE_PATH}}
 
-    # --- EXPORT THE EXE ---
+    # Manifests and metdata checks to ensure they are embedded. This should prevent AV issues.
+    - name: Verify Manifests and Metadata
+      run: |
+        $exes = @("Release\singleinstance.exe", "Release\singleinstance_hidden.exe")
+        foreach ($exe in $exes) {
+            Write-Host "Checking $exe..."
+            # Check for the manifest string
+            if (Select-String -Path $exe -Pattern "requestedExecutionLevel" -Quiet) {
+                Write-Host "  [PASS] Manifest found." -ForegroundColor Green
+            } else {
+                Write-Error "  [FAIL] Manifest missing in $exe"
+                exit 1
+            }
+        }      
+
+    # --- EXPORT THE EXE FILES ---
     - name: Upload Build Artifact
       uses: actions/upload-artifact@v4
       with:
