@@ -64,7 +64,7 @@ jobs:
         "| File | Manifest | SHA-256 Checksum |" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
         "| :--- | :--- | :--- |" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
 
-        Clear-Content $checksumFile -ErrorAction SilentlyContinue
+        if (Test-Path $checksumFile) { Remove-Item $checksumFile }
 
         foreach ($exe in $exes) {
             if (Test-Path $exe) {
@@ -73,13 +73,13 @@ jobs:
                 $hasManifest = Select-String -Path $exe -Pattern "requestedExecutionLevel" -Quiet
                 $manifestStatus = $hasManifest ? "✅ PASS" : "❌ FAIL"
                 
-                # 1. Write to the Job Summary (Flashy Summary Page)
-                "| **$filename** | $manifestStatus | `$hash` |" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+                # 1. Write to the Job Summary (Fixed interpolation)
+                "| **${filename}** | $manifestStatus | `$hash` |" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
                 
-                # 2. Write to the logs (Console)
-                Write-Host "Processed $filename: $hash" -ForegroundColor Cyan
+                # 2. Write to the logs (Fixed interpolation)
+                Write-Host "Processed ${filename}: $hash" -ForegroundColor Cyan
                 
-                # 3. Write to the checksums.txt (For the Zip)
+                # 3. Write to the checksums.txt
                 "$hash  $filename" | Out-File -FilePath $checksumFile -Append -Encoding ascii
                 
                 if (-not $hasManifest) { 
@@ -88,7 +88,7 @@ jobs:
                 }
             }
         }
-        Write-Host "Checksums.txt created in Release folder." -ForegroundColor Green    
+        Write-Host "Checksums.txt created in Release folder." -ForegroundColor Green  
 
     # --- EXPORT THE EXE FILES ---
     - name: Upload Build Artifact
