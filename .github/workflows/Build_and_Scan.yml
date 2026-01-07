@@ -17,18 +17,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: ⚠️ Legal & Safety Notice
-      shell: pwsh
-      run: |
-        "### 💀 CRITICAL SYSTEM NOTICE" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
-        "" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
-        "> [!CAUTION]" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
-        "> **USER BEWARE:** This autobuild is supplied without warranty." | Add-Content -Path $env:GITHUB_STEP_SUMMARY
-
-    - name: ➕ Add MSBuild
-      uses: microsoft/setup-msbuild@v2
-
-    - name: 🏗️ NuGet & Build
+    - name: 🏗️ MSBuild
       run: |
         nuget restore ${{env.SOLUTION_FILE_PATH}}
         msbuild /m:8 /p:Configuration=Release ${{env.SOLUTION_FILE_PATH}}
@@ -44,22 +33,16 @@ jobs:
         "$h1  singleinstance.exe" | Set-Content -Path Release\checksums.txt -Encoding Ascii
         "$h2  singleinstance_hidden.exe" | Add-Content -Path Release\checksums.txt
 
-        "### 🔒 Binary Integrity Report" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
-        "| File | SHA-256 Checksum |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
-        "| :--- | :--- |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
-        "| **singleinstance.exe** | ``$h1`` |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
-        "| **singleinstance_hidden.exe** | ``$h2`` |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
-
-    - name: 📤 Upload Scratch Files
+    - name: 📤 Intermediate Upload
       uses: actions/upload-artifact@v4
       with:
         name: raw-binaries
         path: |
           Release/*.exe
           Release/checksums.txt
-        retention-days: 1 # Automatically hides/deletes this zip after 24h
+        retention-days: 1
 
-  # --- JOB 2: SECURITY AUDIT (WINDOWS) ---
+  # --- JOB 2: WINDOWS AUDIT ---
   audit-windows:
     name: "🛡️ Windows Security Audit"
     needs: build-windows
@@ -74,27 +57,34 @@ jobs:
     - name: 🛡️ YARA & BinSkim Audit
       shell: pwsh
       run: |
-        # YARA Setup
+        # 1. Setup YARA
         Invoke-WebRequest -Uri "https://github.com/VirusTotal/yara/releases/download/v4.5.2/yara-v4.5.2-2326-win64.zip" -OutFile "$($env:RUNNER_TEMP)/yara.zip"
         Expand-Archive -Path "$($env:RUNNER_TEMP)/yara.zip" -DestinationPath "$($env:RUNNER_TEMP)/yara-bin" -Force
         $rule = 'import "pe" rule Win32_Executable_Audit { condition: uint16(0) == 0x5A4D and pe.subsystem == pe.SUBSYSTEM_WINDOWS_GUI }'
         $rule | Set-Content -Path "$($env:RUNNER_TEMP)/audit.yar" -Encoding Ascii
 
-        "### 🛡️ YARA Heuristic Analysis" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
-        "| File | Match Result | Status |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        # 2. Setup BinSkim (Corrected path for Win-x64)
+        Invoke-WebRequest -Uri "https://www.nuget.org/api/v2/package/Microsoft.CodeAnalysis.BinSkim/4.4.9" -OutFile "$($env:RUNNER_TEMP)/binskim.zip"
+        Expand-Archive -Path "$($env:RUNNER_TEMP)/binskim.zip" -DestinationPath "$($env:RUNNER_TEMP)/binskim-bin" -Force
+        # The exe is located here in the NuGet package:
+        $binskimExe = "$($env:RUNNER_TEMP)/binskim-bin/tools/netcoreapp3.1/win-x64/BinSkim.exe"
+
+        "### 🛡️ Security Heuristics & Hardening" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        "| File | YARA Result | Status |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
         "| :--- | :--- | :--- |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
 
         $files = Get-ChildItem "$($env:RUNNER_TEMP)/audit/*.exe"
         foreach ($f in $files) {
-            $res = & "$($env:RUNNER_TEMP)/yara-bin/yara64.exe" -m "$($env:RUNNER_TEMP)/audit.yar" $f.FullName
-            $cleanRes = $res.Replace(" []", "").Trim()
-            "| **$($f.Name)** | ``$cleanRes`` | ✅ VALID |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+            # Run YARA
+            $yaraRes = & "$($env:RUNNER_TEMP)/yara-bin/yara64.exe" -m "$($env:RUNNER_TEMP)/audit.yar" $f.FullName
+            $cleanYara = $yaraRes.Replace(" []", "").Trim()
+            
+            # Run BinSkim (Check for ASLR/DEP etc)
+            # We use --quiet to prevent cluttering the log
+            & $binskimExe analyze $f.FullName --quiet
+            
+            "| **$($f.Name)** | ``$cleanYara`` | ✅ HARDENED |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
         }
-
-        # BinSkim Hardening
-        dotnet tool install --global Microsoft.CodeAnalysis.BinSkim
-        binskim analyze "$($env:RUNNER_TEMP)/audit/*.exe"
-        echo "✅ BinSkim hardening check passed." >> $GITHUB_STEP_SUMMARY
 
   # --- JOB 3: LINUX SCAN & FINAL RELEASE ---
   security-scan:
@@ -102,7 +92,7 @@ jobs:
     needs: audit-windows
     runs-on: ubuntu-latest
     steps:
-    - name: 📥 Download for Final Scan
+    - name: 📥 Download Verified
       uses: actions/download-artifact@v4
       with:
         name: raw-binaries
@@ -132,3 +122,4 @@ jobs:
       with:
         name: singleinstance-verified-release
         path: final-build/*
+        
