@@ -10,9 +10,9 @@ env:
   SOLUTION_FILE_PATH: .
 
 jobs:
-  # --- JOB 1: WINDOWS BUILD & NATIVE YARA ---
+  # --- JOB 1: WINDOWS BUILD ---
   build-windows:
-    name: "🏗️ Build & Win-Audit (Win x86 🪟)"
+    name: "🏗️ Build Binaries"
     runs-on: windows-latest
     steps:
     - uses: actions/checkout@v4
@@ -52,9 +52,17 @@ jobs:
         "| **singleinstance.exe** | ``$h1`` |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
         "| **singleinstance_hidden.exe** | ``$h2`` |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
 
-   # --- JOB 2: YARA AUDIT (WINDOWS) ---
+    - name: 📤 Upload to Pipeline
+      uses: actions/upload-artifact@v4
+      with:
+        name: raw-binaries
+        path: |
+          Release/*.exe
+          Release/checksums.txt
+
+  # --- JOB 2: YARA AUDIT (WINDOWS) ---
   yara-audit:
-    name: "🛡️ YARA Audit"
+    name: "🛡️ Deep PE Audit with YARA"
     needs: build-windows
     runs-on: windows-latest
     steps:
@@ -63,24 +71,6 @@ jobs:
       with:
         name: raw-binaries
         path: Release
-
-    - name: 🔍 Integrity Audit (SHA-256)
-      shell: pwsh
-      run: |
-        $exe1 = "Release\singleinstance.exe"
-        $exe2 = "Release\singleinstance_hidden.exe"
-        $h1 = (Get-FileHash $exe1 -Algorithm SHA256).Hash.ToLower()
-        $h2 = (Get-FileHash $exe2 -Algorithm SHA256).Hash.ToLower()
-        
-        # Write checksums for Linux (hash + space + space + filename)
-        "$h1  singleinstance.exe" | Set-Content -Path Release\checksums.txt -Encoding Ascii
-        "$h2  singleinstance_hidden.exe" | Add-Content -Path Release\checksums.txt
-
-        "### 🔒 Binary Integrity Report" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
-        "| File | SHA-256 Checksum |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
-        "| :--- | :--- |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
-        "| **singleinstance.exe** | ``$h1`` |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
-        "| **singleinstance_hidden.exe** | ``$h2`` |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY   
 
     - name: 🛡️ Deep PE Audit with YARA
       shell: pwsh
@@ -105,24 +95,16 @@ jobs:
             }
         }
 
-    - name: 📤 Upload Binaries for Linux Scan
-      uses: actions/upload-artifact@v4
-      with:
-        name: build-binaries
-        path: |
-          Release/*.exe
-          Release/checksums.txt
-
-  # --- JOB 2: LINUX SECURITY SCAN ---
+  # --- JOB 3: LINUX SECURITY SCAN ---
   security-scan:
-    name: "🛡️ Security Audit (Linux 🐧)"
+    name: "🛡️ ClamAV Virus Scan"
     needs: yara-audit
     runs-on: ubuntu-latest
     steps:
     - name: 📥 Download Binaries
       uses: actions/download-artifact@v4
       with:
-        name: build-binaries
+        name: raw-binaries
         path: scan-dir
 
     - name: 🔍 Verify Transfer Integrity
@@ -131,21 +113,16 @@ jobs:
         echo "### 📂 Cross-Platform Integrity Check" >> $GITHUB_STEP_SUMMARY
         if sha256sum -c checksums.txt; then
           echo "✅ All hashes verified successfully on Linux." >> $GITHUB_STEP_SUMMARY
-          
-          # 2. Generate the matching report table
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| File | SHA-256 Checksum (Verified) |" >> $GITHUB_STEP_SUMMARY
           echo "| :--- | :--- |" >> $GITHUB_STEP_SUMMARY
-          
-          # Read the checksums file and format into table rows
           while read -r line; do
             hash=$(echo $line | awk '{print $1}')
             file=$(echo $line | awk '{print $2}')
             echo "| **$file** | \`$hash\` |" >> $GITHUB_STEP_SUMMARY
           done < checksums.txt
-          
         else
-          echo "❌ **CRITICAL: Integrity check failed!** The files may have been corrupted during transfer." >> $GITHUB_STEP_SUMMARY
+          echo "❌ **CRITICAL: Integrity check failed!**" >> $GITHUB_STEP_SUMMARY
           exit 1
         fi
         echo "---" >> $GITHUB_STEP_SUMMARY
