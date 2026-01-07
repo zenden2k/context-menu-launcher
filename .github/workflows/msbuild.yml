@@ -59,7 +59,7 @@ jobs:
         $exes = @("Release\singleinstance.exe", "Release\singleinstance_hidden.exe")
         $checksumFile = "Release\checksums.txt"
         
-        # Start the Summary Header with a blank line for Markdown compliance
+        # Start the Summary Header
         "### 🔒 Binary Verification Report" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
         "" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
         "| File | Manifest | SHA-256 Checksum |" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
@@ -74,21 +74,15 @@ jobs:
                 $hasManifest = Select-String -Path $exe -Pattern "requestedExecutionLevel" -Quiet
                 $manifestStatus = $hasManifest ? "✅ PASS" : "❌ FAIL"
                 
-                # 1. Write to the Job Summary (Using explicit quotes and braces)
-                "| **${filename}** | ${manifestStatus} | `${hash}` |" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+                # USE DOUBLE QUOTES HERE TO EXPAND VARIABLES
+                "| **$filename** | $manifestStatus | ``$hash`` |" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
                 
-                # 2. Write to the logs
-                Write-Host "Processed ${filename}: ${hash}" -ForegroundColor Cyan
+                Write-Host "Processed ${filename}: $hash" -ForegroundColor Cyan
+                "$hash  $filename" | Out-File -FilePath $checksumFile -Append -Encoding ascii
                 
-                # 3. Write to the checksums.txt
-                "${hash}  ${filename}" | Out-File -FilePath $checksumFile -Append -Encoding ascii
-                
-                if (-not $hasManifest) { 
-                    Write-Error "Manifest missing in $filename"
-                    exit 1 
-                }
+                if (-not $hasManifest) { exit 1 }
             }
-        } 
+        }
 
     # --- EXPORT THE EXE FILES ---
     - name: Upload Build Artifact
@@ -97,5 +91,6 @@ jobs:
         name: singleinstance-binaries
         path: |
            ./Release/*.exe
+           ./Release/checksums.txt
            # Exclude the PDBs as discussed earlier to keep it clean
            !./Release/*.pdb
