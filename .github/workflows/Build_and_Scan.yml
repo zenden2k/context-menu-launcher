@@ -12,7 +12,7 @@ env:
 jobs:
   # --- JOB 1: WINDOWS BUILD ---
   build-windows:
-    name: "🏗️ Win32 x86 Build"
+    name: "🏗️ Build, Microsoft Defender Check & Verification (Win x86 🪟) "
     runs-on: windows-latest
     outputs:
       hash1: ${{ steps.audit.outputs.hash1 }}
@@ -58,13 +58,31 @@ jobs:
         
         "$h1  singleinstance.exe`n$h2  singleinstance_hidden.exe" | Out-File -FilePath Release\checksums.txt -Encoding ascii
 
-    - name: 🛡️ Windows Defender Scan
+    - name: 🔍 Deep PE Audit (YARA)
       shell: pwsh
       run: |
-        Start-MpScan -ScanPath "Release\" -ScanType CustomScan
-        Write-Host "Defender scan completed successfully." -ForegroundColor Green     
+        # 1. Download standalone YARA
+        Invoke-WebRequest -Uri "https://github.com/VirusTotal/yara/releases/download/v4.5.2/yara-v4.5.2-2326-win64.zip" -OutFile "yara.zip"
+        Expand-Archive -Path "yara.zip" -DestinationPath "yara-bin"
+        
+        # 2. Create a basic PE Audit Rule
+        $rule = @"
+        import "pe"
+        rule Win32_Executable_Audit {
+            condition:
+                uint16(0) == 0x5A4D and pe.subsystem == pe.SUBSYSTEM_WINDOWS_GUI
+        }
+        "@
+        $rule | Out-File -FilePath "audit.yar" -Encoding ascii
 
-    - name: 📤 Upload for Scanning with ClamAV and Yara
+        # 3. Run the scan
+        Write-Host "Starting Deep PE Audit..." -ForegroundColor Cyan
+        ./yara-bin/yara64.exe -m audit.yar Release/singleinstance.exe
+        ./yara-bin/yara64.exe -m audit.yar Release/singleinstance_hidden.exe
+        
+        "✅ Deep PE Audit Complete (YARA 4.5.2)" | Add-Content -Path $env:GITHUB_STEP_SUMMARY  
+
+    - name: 📤 Upload for Scanning with ClamAV, Yara and Microsoft Defender under Linux 🐧
       uses: actions/upload-artifact@v4
       with:
         name: build-binaries
@@ -100,6 +118,12 @@ jobs:
         # Microsoft Defender above performs those checks
         ignores_post: |
           $input.Symbol -match 'extension' -or $input.Symbol -match 'filename'
+
+    - name: 🛡️ Microsoft Defender Scan (Linux)
+      uses: jbrotsos/jbro-test-ghaction@v1
+      with:
+        # We tell it to scan the folder containing your artifacts
+        args: "scan --path ./scan-dir"       
 
     # Move this here so it only uploads if BOTH build and scan passed
     - name: 🚀 Final Artifact Release
