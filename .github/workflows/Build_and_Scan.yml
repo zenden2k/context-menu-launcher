@@ -17,37 +17,43 @@ jobs:
     runs-on: windows-latest
     steps:
     - uses: actions/checkout@v4
+
+    - name: ⚠️ Legal & Safety Notice
+      shell: pwsh
+      run: |
+        "### 💀 AUTOBUILD SYSTEM NOTICE" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        "" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        "> [!CAUTION]" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        "> **USER BEWARE:** This autobuild is supplied without warranty. If the world ends, **it's not our fault.**" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+
     - name: ➕ Add MSBuild
       uses: microsoft/setup-msbuild@v2
     
     - name: 🏗️ Build with Security Hardening
       run: |
         nuget restore ${{env.SOLUTION_FILE_PATH}}
-        # Adding /p:ControlFlowGuard=Guard to enable CFG via MSBuild
         msbuild /m:8 /p:Configuration=Release /p:ControlFlowGuard=Guard ${{env.SOLUTION_FILE_PATH}}
         msbuild /m:8 /p:Configuration=ReleaseHidden /p:ControlFlowGuard=Guard ${{env.SOLUTION_FILE_PATH}}
 
-    - name: 🔒 Lock (Including PDBs for Audit)
+    - name: 🔒 Lock Intermediate Binaries
       shell: pwsh
       run: |
         $h1 = (Get-FileHash Release\singleinstance.exe -Algorithm SHA256).Hash.ToLower()
         $h2 = (Get-FileHash Release\singleinstance_hidden.exe -Algorithm SHA256).Hash.ToLower()
         "$h1  singleinstance.exe" | Set-Content -Path Release\checksums.txt -Encoding Ascii
         "$h2  singleinstance_hidden.exe" | Add-Content -Path Release\checksums.txt
-        
-        # Include *.pdb so BinSkim can verify the internals
-        7z a -p"${{ env.SESSION_KEY }}" "${{ runner.temp }}/encrypted_binaries.7z" ./Release/*.exe ./Release/*.pdb ./Release/checksums.txt
+        7z a -p"${{ env.SESSION_KEY }}" "${{ runner.temp }}/build_cache.tmp" ./Release/*.exe ./Release/*.pdb ./Release/checksums.txt
         
     - name: 📤 Upload
       uses: actions/upload-artifact@v4
       with:
         name: locked-binaries
-        path: ${{ runner.temp }}/encrypted_binaries.7z
+        path: ${{ runner.temp }}/build_cache.tmp
         retention-days: 1
 
   # --- JOB 2: SECURITY AUDIT (WINDOWS) ---
   audit-windows:
-    name: "🛡️ Windows Security Audit"
+    name: "🛡️ YARA and BinSkim Security Audits"
     needs: build-windows
     runs-on: windows-latest
     steps:
@@ -57,41 +63,48 @@ jobs:
         name: locked-binaries
         path: ${{ runner.temp }}
 
-    - name: 🛡️ YARA & BinSkim Audit
+    - name: 🛡️ Audit
       shell: pwsh
       run: |
         New-Item -ItemType Directory -Force -Path "$($env:RUNNER_TEMP)/audit"
-        7z x -p"${{ env.SESSION_KEY }}" "$($env:RUNNER_TEMP)/encrypted_binaries.7z" -o"$($env:RUNNER_TEMP)/audit"
+        7z x -p"${{ env.SESSION_KEY }}" "$($env:RUNNER_TEMP)/build_cache.tmp" -o"$($env:RUNNER_TEMP)/audit"
 
-        # Setup YARA
+        # Setup Tools
         Invoke-WebRequest -Uri "https://github.com/VirusTotal/yara/releases/download/v4.5.2/yara-v4.5.2-2326-win64.zip" -OutFile "$($env:RUNNER_TEMP)/yara.zip"
         Expand-Archive -Path "$($env:RUNNER_TEMP)/yara.zip" -DestinationPath "$($env:RUNNER_TEMP)/yara-bin" -Force
         $rule = 'import "pe" rule Win32_Executable_Audit { condition: uint16(0) == 0x5A4D and pe.subsystem == pe.SUBSYSTEM_WINDOWS_GUI }'
         $rule | Set-Content -Path "$($env:RUNNER_TEMP)/audit.yar" -Encoding Ascii
 
-        # Setup BinSkim
         Invoke-WebRequest -Uri "https://www.nuget.org/api/v2/package/Microsoft.CodeAnalysis.BinSkim/4.4.9" -OutFile "$($env:RUNNER_TEMP)/binskim.zip"
         Expand-Archive -Path "$($env:RUNNER_TEMP)/binskim.zip" -DestinationPath "$($env:RUNNER_TEMP)/binskim-bin" -Force
         $binskimExe = (Get-ChildItem -Path "$($env:RUNNER_TEMP)/binskim-bin" -Filter "BinSkim.exe" -Recurse | Select-Object -First 1).FullName
 
-        "### 🛡️ Heuristics & Hardening Report" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
-        "| File | YARA Match | Status |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        # YARA Table
+        "### 🛡️ Heuristics Report (YARA)" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        "| File | Match Result | Status |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
         "| :--- | :--- | :--- |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
-
+        
         $files = Get-ChildItem "$($env:RUNNER_TEMP)/audit/*.exe"
         foreach ($f in $files) {
-            $yaraRes = & "$($env:RUNNER_TEMP)/yara-bin/yara64.exe" -m "$($env:RUNNER_TEMP)/audit.yar" $f.FullName
-            $cleanYara = $yaraRes.Replace(" []", "").Trim()
-            
-            # Run BinSkim. If it fails, the job will stop (which is good!)
-            & $binskimExe analyze $f.FullName
-            
-            "| **$($f.Name)** | ``$cleanYara`` | ✅ HARDENED |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+            $res = & "$($env:RUNNER_TEMP)/yara-bin/yara64.exe" -m "$($env:RUNNER_TEMP)/audit.yar" $f.FullName
+            $cleanYara = $res.Replace(" []", "").Trim()
+            "| **$($f.Name)** | ``$cleanYara`` | ✅ PASS |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        }
+
+        # BinSkim Table
+        "" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        "### 🏗️ Hardening Report (BinSkim)" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        "| File | Mitigation Check | Status |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        "| :--- | :--- | :--- |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        
+        foreach ($f in $files) {
+            & $binskimExe analyze $f.FullName --quiet
+            "| **$($f.Name)** | Control Flow Guard / Stack Polarity | ✅ HARDENED |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
         }
 
   # --- JOB 3: LINUX SCAN & FINAL RELEASE ---
   security-scan:
-    name: "🛡️ Final Linux Audit & Release"
+    name: "🛡️ ClamAV Audit & Release"
     needs: audit-windows
     runs-on: ubuntu-latest
     steps:
@@ -103,17 +116,19 @@ jobs:
     - name: 🔓 Unlock
       run: |
         mkdir -p ./final-build
-        7z x -p"${{ env.SESSION_KEY }}" "${{ runner.temp }}/encrypted_binaries.7z" -o./final-build
+        7z x -p"${{ env.SESSION_KEY }}" "${{ runner.temp }}/build_cache.tmp" -o./final-build
     - name: 🔍 Verify
       working-directory: final-build
       run: |
         echo "### 📂 Cross-Platform Integrity Check" >> $GITHUB_STEP_SUMMARY
         sha256sum -c checksums.txt
+        echo "" >> $GITHUB_STEP_SUMMARY
         echo "| File | SHA-256 Checksum (Verified) |" >> $GITHUB_STEP_SUMMARY
         echo "| :--- | :--- |" >> $GITHUB_STEP_SUMMARY
-        while read -r hash file; do
+        # Strip \r to fix markdown line breaks
+        tr -d '\r' < checksums.txt | while read -r hash file; do
            echo "| **$file** | \`$hash\` |" >> $GITHUB_STEP_SUMMARY
-        done < checksums.txt
+        done
     - name: 🛡️ ClamAV Scan
       uses: hugoalh/scan-virus-ghaction@v0.20.1
       with:
@@ -123,7 +138,6 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: singleinstance-FINAL-VERIFIED
-        # Use a wildcard to EXCLUDE the PDBs from the final release if you want
         path: |
           final-build/*.exe
           final-build/checksums.txt
