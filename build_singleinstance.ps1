@@ -1,4 +1,4 @@
-# Build singleinstance.exe
+# Build singleinstance.exe and singleinstance_hidden.exe
 # Finds Visual Studio and the latest MSVC toolkit, saves errors from version changes.
 
 # 1. Locate vswhere.exe (Checking both x86 and 64-bit Program Files)
@@ -36,7 +36,9 @@ if (Test-Path $msvcRoot) {
 if (Test-Path $msBuildPath) {
     Write-Host "Building Release..." -ForegroundColor Green
     & $msBuildPath /m:8 /property:Configuration=Release .\singleinstance.sln
-} else {
+    & $msBuildPath /m:8 /property:Configuration=ReleaseHidden .\singleinstance.sln
+}
+else {
     Write-Error "MSBuild not found at: $msBuildPath"
 }
 
@@ -44,6 +46,8 @@ if (Test-Path $msBuildPath) {
 if ($dumpbinPath -and (Test-Path $dumpbinPath)) {
     Write-Host "Checking dependencies..." -ForegroundColor Green
     & $dumpbinPath /dependents .\Release\singleinstance.exe
-} else {
+    & $dumpbinPath /dependents .\Release\singleinstance_hidden.exe
+}
+else {
     Write-Error "Dumpbin.exe not found. Check if C++ build tools are installed."
 }

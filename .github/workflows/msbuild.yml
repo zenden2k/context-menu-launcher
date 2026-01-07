@@ -8,7 +8,8 @@ on:
 
 env:
   SOLUTION_FILE_PATH: .
-  BUILD_CONFIGURATION: Release
+  BUILD_RELEASE: Release
+  BUILD_HIDDEN: ReleaseHidden
 
 permissions:
   contents: read
@@ -24,23 +25,19 @@ jobs:
     - name: ⚠️ Legal & Safety Notice
       shell: pwsh
       run: |
-        $msg = @"
-        ### 🚀 Build Disclaimer & Safety Warning
-        
-        > [!IMPORTANT]
-        > This workflow build made from the code you can see in the repo is supplied **"AS-IS"** without support, warranty, or even a sense of self-preservation.
-        
-        **Potential Side Effects include:**
-        * Your OS might decide it's better off as a blank screen. 🖥️💨
-        * Your files may leave this physical realm without notice. 🚮
-        * Your computer spontaneously becoming a very expensive space heater. 🌡️
-        * Global stock markets performing a backflip. 📉
-        * Coffee machines refusing to brew. ☕
-        * Unexpected temporal anomalies. 🌀
-        
-        If the world ends, **it's not our fault.** Use at your own risk!
-        "@
-        echo $msg >> $GITHUB_STEP_SUMMARY
+        echo "### 💀 CRITICAL SYSTEM NOTICE" >> $env:GITHUB_STEP_SUMMARY
+        echo "" >> $env:GITHUB_STEP_SUMMARY
+        echo "> [!CAUTION]" >> $env:GITHUB_STEP_SUMMARY
+        echo "> **USER BEWARE:** This autobuild is supplied without warranty." >> $env:GITHUB_STEP_SUMMARY
+        echo "" >> $env:GITHUB_STEP_SUMMARY
+        echo "Using this software may result in:" >> $env:GITHUB_STEP_SUMMARY
+        echo "1. **System Self-Termination:** Your OS might deciding it's better off as a blank screen. 🖥️💨" >> $env:GITHUB_STEP_SUMMARY
+        echo "2. **Data Transcendence:** Your files may leave this physical realm without notice. 🚮" >> $env:GITHUB_STEP_SUMMARY
+        echo "3. **Total Hardware Regret:** Your motherboard may experience a sudden desire to become molten slag. 🔥" >> $env:GITHUB_STEP_SUMMARY
+        echo "" >> $env:GITHUB_STEP_SUMMARY
+        echo "If your computer decides to delete its own soul, **it is not our fault.**" >> $env:GITHUB_STEP_SUMMARY
+        echo "" >> $env:GITHUB_STEP_SUMMARY
+        echo "If the world ends, **it's not our fault.** Use at your own risk! 🚀" >> $env:GITHUB_STEP_SUMMARY
         Write-Host "Disclaimer posted to Job Summary." -ForegroundColor Cyan
 
     - name: Add MSBuild to PATH
@@ -52,13 +49,15 @@ jobs:
 
     - name: Build
       working-directory: ${{env.GITHUB_WORKSPACE}}
-      run: msbuild /m /p:Configuration=${{env.BUILD_CONFIGURATION}} ${{env.SOLUTION_FILE_PATH}}
+      run: |
+          msbuild /m:8 /p:Configuration=${{env.BUILD_RELEASE}} ${{env.SOLUTION_FILE_PATH}}
+          msbuild /m:8 /p:Configuration=${{env.BUILD_HIDDEN}} ${{env.SOLUTION_FILE_PATH}}
 
     # --- EXPORT THE EXE ---
     - name: Upload Build Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: singleinstance-binary
+        name: singleinstance-binaries
         path: |
            ./Release/*.exe
            # Exclude the PDBs as discussed earlier to keep it clean

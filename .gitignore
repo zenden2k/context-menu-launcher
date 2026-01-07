@@ -1,28 +1,46 @@
-# Compiled Object files
-*.slo
-*.lo
-*.o
-*.obj
+# --- Visual Studio Specific ---
+.vs/
+ipch/
+*.aps
+*.ncb
+*.opendb
+*.opensdf
+*.sdf
+*.cache
+*.db
+*.VC.db
+*.VC.opendb
 
-# Precompiled Headers
-*.gch
-*.pch
+# --- Build Output Directories ---
+# Ignore the folders entirely rather than just the file extensions
+Release/
+Debug/
+singleinstance/Release/
+singleinstance/ReleaseHidden/
+x64/
+Win32/
+bin/
+obj/
 
-# Compiled Dynamic libraries
-*.so
-*.dylib
-*.dll
-
-# Fortran module files
-*.mod
-
-# Compiled Static libraries
-*.lai
-*.la
-*.a
-*.lib
-
-# Executables
+# --- Artifacts & Temporary Files ---
 *.exe
-*.out
-*.app
+*.dll
+*.lib
+*.pdb
+*.obj
+*.ilk
+*.exp
+*.log
+*.tlog
+*.lastbuildstate
+*.unsuccessfulbuild
+
+# --- User-specific files ---
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# --- GitHub Workflow Artifacts ---
+# If your build creates temporary local zips
+*.zip
