@@ -141,7 +141,7 @@ jobs:
 
   # --- JOB 4: PARALLEL CLAMAV SCAN ---
   audit-clamav:
-    name: "🛡️ Malware Signatures"
+    name: "🛡️ ClamAV Scan"
     needs: build
     runs-on: ubuntu-latest
     steps:
@@ -159,28 +159,44 @@ jobs:
     - name: 🛡️ Virus Scan
       id: clamav_scan
       uses: hugoalh/scan-virus-ghaction@v0.20.1
-      continue-on-error: true # Allow us to format the table even if it finds something
+      continue-on-error: true
       with:
         clamav_enable: true
         yara_enable: false
-        scan_path: ./scan-work
+        entryPoint: './scan-work'
+        # Ensure a log is generated so we can parse it
+        found_log: 'clamav_found.log'
 
     - name: 📊 Generate Malware Report
       run: |
         echo "### 🛡️ Malware Signature Report (ClamAV)" >> $GITHUB_STEP_SUMMARY
-        echo "| Scanner | Target Path | Status |" >> $GITHUB_STEP_SUMMARY
+        echo "| File | Scanner | Status |" >> $GITHUB_STEP_SUMMARY
         echo "| :--- | :--- | :--- |" >> $GITHUB_STEP_SUMMARY
         
-        if [ "${{ steps.clamav_scan.outcome }}" == "success" ]; then
-          echo "| **ClamAV** | \`./scan-work\` | ✅ CLEAN |" >> $GITHUB_STEP_SUMMARY
-        else
-          echo "| **ClamAV** | \`./scan-work\` | ❌ THREAT DETECTED |" >> $GITHUB_STEP_SUMMARY
-          exit 1 # Fail the job if a virus was found
+        # Loop through the executables in the scan directory
+        for file in ./scan-work/*.exe; do
+          filename=$(basename "$file")
+          
+          # Check if this specific filename appears in the 'found' log
+          if grep -q "$filename" clamav_found.log 2>/dev/null; then
+            echo "| **$filename** | ClamAV | ❌ THREAT DETECTED |" >> $GITHUB_STEP_SUMMARY
+            HAS_THREAT=true
+          else
+            echo "| **$filename** | ClamAV | ✅ CLEAN |" >> $GITHUB_STEP_SUMMARY
+          fi
+        done
+
+        # Final outcome handling
+        if [ "$HAS_THREAT" = true ]; then
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "> [!CAUTION]" >> $GITHUB_STEP_SUMMARY
+          echo "> Malware signatures were detected in one or more binaries." >> $GITHUB_STEP_SUMMARY
+          exit 1
         fi
 
   # --- JOB 5: FINAL RELEASE ---
   release:
-    name: "🚀 Generate Release"
+    name: "📦 Generate Release"
     needs: [audit-yara, audit-binskim, audit-clamav]
     runs-on: ubuntu-latest
     steps:
