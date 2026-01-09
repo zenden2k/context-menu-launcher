@@ -28,7 +28,7 @@ jobs:
         "> [!CAUTION]" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
         "> **USER BEWARE:** This autobuild is supplied without warranty. If the world ends, **it's not our fault.**" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
         "" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
-        "Once complete the `singleinstance-binaries` download contains both .exe files." | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        "Once complete the ``singleinstance-binaries`` download contains both .exe files." | Add-Content -Path $env:GITHUB_STEP_SUMMARY
 
     - name: ➕ Add MSBuild
       uses: microsoft/setup-msbuild@v2
@@ -213,12 +213,11 @@ jobs:
         mkdir -p ./final-build
         7z x -p"${{ env.SESSION_KEY }}" "${{ runner.temp }}/build_cache.tmp" -o./final-build
         echo "###  🔒 Final Binary Verification" >> $GITHUB_STEP_SUMMARY
+        echo "SHA256 values should match initial verification above." >> $GITHUB_STEP_SUMMARY
         echo "| File | SHA-256 Checksum (Verified) |" >> $GITHUB_STEP_SUMMARY
         echo "| :--- | :--- |" >> $GITHUB_STEP_SUMMARY
         tr -d '\r' < ./final-build/checksums.txt | while read -r hash file; do
            echo "| **$file** | \`$hash\` |" >> $GITHUB_STEP_SUMMARY
-        echo ""  >> $GITHUB_STEP_SUMMARY
-        echo "SHA256 values should match initial verification above." >> $GITHUB_STEP_SUMMARY
         done
     - name: 🚀 FINAL RELEASE
       uses: actions/upload-artifact@v4
