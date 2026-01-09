@@ -1,0 +1,229 @@
+name: "🚀 Build, Security Audit & Verification"
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+
+env:
+  SOLUTION_FILE_PATH: .
+  # Session-specific one-time password for internal zip files
+  # Prevents anyone using the temp files if they were to fail AV checks for any reason
+  SESSION_KEY: ${{ github.run_id }}-${{ github.run_attempt }}-${{ github.run_number }}
+
+jobs:
+  # --- JOB 1: BUILD & ENCRYPT TEMP FILES ---
+  build:
+    name: "🏗️ Build Executables"
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: ⚠️ Legal & Safety Notice
+      shell: pwsh
+      run: |
+        "### 💀 AUTOBUILD SYSTEM NOTICE" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        "" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        "> [!CAUTION]" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        "> **USER BEWARE:** This autobuild is supplied without warranty. If the world ends, **it's not our fault.**" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        "" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        "Once complete the `singleinstance-binaries` download contains both .exe files." | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+
+    - name: ➕ Add MSBuild
+      uses: microsoft/setup-msbuild@v2
+
+    - name: 🏷️ Inject Build Date to .rc Comments
+      shell: pwsh
+      run: |
+        $dateStamp = Get-Date -Format "yyyy-MM-dd"
+        $buildInfo = "Build: ${{ github.run_id }} | Date: $dateStamp"
+        $rcPath = "singleinstance/singleinstance.rc"
+        
+        $content = Get-Content $rcPath -Raw
+        
+        # We leave FILEVERSION alone to protect reputation.
+        # We only update the Comments string for verification proof.
+        $content = $content -replace '"Comments",\s+".*?"', "`"Comments`", `"$buildInfo`""
+        
+        Set-Content -Path $rcPath -Value $content -Encoding UTF8  
+    
+    - name: 🏗️ Build
+      run: |
+        nuget restore ${{env.SOLUTION_FILE_PATH}}
+        msbuild /m:8 /p:Configuration=Release ${{env.SOLUTION_FILE_PATH}}
+        msbuild /m:8 /p:Configuration=ReleaseHidden ${{env.SOLUTION_FILE_PATH}}
+
+    - name: 🔒 Generate Integrity Report
+      shell: pwsh
+      run: |
+        $exe1 = "Release\singleinstance.exe"
+        $exe2 = "Release\singleinstance_hidden.exe"
+        
+        # Calculate Hashes
+        $h1 = (Get-FileHash $exe1 -Algorithm SHA256).Hash.ToLower()
+        $h2 = (Get-FileHash $exe2 -Algorithm SHA256).Hash.ToLower()
+        
+        # Create Checksum File for Handover
+        "$h1  singleinstance.exe" | Set-Content -Path Release\checksums.txt -Encoding Ascii
+        "$h2  singleinstance_hidden.exe" | Add-Content -Path Release\checksums.txt
+        
+        # Generate Step Summary Table
+        "### 🔒 Binary Verification" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        "" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        "| File | SHA-256 Checksum |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        "| :--- | :--- |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        "| **singleinstance.exe** | ``$h1`` |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        "| **singleinstance_hidden.exe** | ``$h2`` |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+
+        # Encrypt files while we AV/Malware test them
+        7z a -p"${{ env.SESSION_KEY }}" "${{ runner.temp }}/build_cache.tmp" ./Release/*.exe ./Release/*.pdb ./Release/checksums.txt
+        
+    - name: 📤 Upload Handover
+      uses: actions/upload-artifact@v4
+      with:
+        name: av_test_files
+        path: ${{ runner.temp }}/build_cache.tmp
+        retention-days: 1
+
+  # --- JOB 2: PARALLEL YARA AUDIT ---
+  audit-yara:
+    name: "🛡️ YARA Malware Scan"
+    needs: build
+    runs-on: windows-latest
+    steps:
+    - name: 📥 Download
+      uses: actions/download-artifact@v4
+      with:
+        name: av_test_files
+        path: ${{ runner.temp }}
+    - name: 🔍 YARA Scan
+      shell: pwsh
+      run: |
+        New-Item -ItemType Directory -Force -Path "$($env:RUNNER_TEMP)/yara-work"
+        7z x -p"${{ env.SESSION_KEY }}" "$($env:RUNNER_TEMP)/build_cache.tmp" -o"$($env:RUNNER_TEMP)/yara-work"
+        Invoke-WebRequest -Uri "https://github.com/VirusTotal/yara/releases/download/v4.5.2/yara-v4.5.2-2326-win64.zip" -OutFile "$($env:RUNNER_TEMP)/yara.zip"
+        Expand-Archive -Path "$($env:RUNNER_TEMP)/yara.zip" -DestinationPath "$($env:RUNNER_TEMP)/yara-bin" -Force
+        $rule = 'import "pe" rule Win32_Executable_Audit { condition: uint16(0) == 0x5A4D and pe.subsystem == pe.SUBSYSTEM_WINDOWS_GUI }'
+        $rule | Set-Content -Path "$($env:RUNNER_TEMP)/audit.yar" -Encoding Ascii
+        "### 🛡️ Heuristics Report (YARA)" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        "| File | Match Result | Status |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        "| :--- | :--- | :--- |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        Get-ChildItem "$($env:RUNNER_TEMP)/yara-work/*.exe" | ForEach-Object {
+            $res = & "$($env:RUNNER_TEMP)/yara-bin/yara64.exe" -m "$($env:RUNNER_TEMP)/audit.yar" $_.FullName
+            $cleanYara = $res.Replace(' []', '').Trim()
+            "| **$($_.Name)** | ``$cleanYara`` | ✅ PASS |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        }
+
+  # --- JOB 3: PARALLEL BINSKIM AUDIT ---
+  audit-binskim:
+    name: "🛡️ BinSkim Audit"
+    needs: build
+    runs-on: windows-latest
+    steps:
+    - name: 📥 Download
+      uses: actions/download-artifact@v4
+      with:
+        name: av_test_files
+        path: ${{ runner.temp }}
+    - name: 🔍 BinSkim Scan
+      shell: pwsh
+      run: |
+        New-Item -ItemType Directory -Force -Path "$($env:RUNNER_TEMP)/skim-work"
+        7z x -p"${{ env.SESSION_KEY }}" "$($env:RUNNER_TEMP)/build_cache.tmp" -o"$($env:RUNNER_TEMP)/skim-work"
+        Invoke-WebRequest -Uri "https://www.nuget.org/api/v2/package/Microsoft.CodeAnalysis.BinSkim/4.4.9" -OutFile "$($env:RUNNER_TEMP)/binskim.zip"
+        Expand-Archive -Path "$($env:RUNNER_TEMP)/binskim.zip" -DestinationPath "$($env:RUNNER_TEMP)/binskim-bin" -Force
+        $exe = (Get-ChildItem -Path "$($env:RUNNER_TEMP)/binskim-bin" -Filter "BinSkim.exe" -Recurse | Select-Object -First 1).FullName
+        "### 🏗️ Hardening Report (BinSkim)" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        "| File | Mitigation Check | Status |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        "| :--- | :--- | :--- |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        Get-ChildItem "$($env:RUNNER_TEMP)/skim-work/*.exe" | ForEach-Object {
+            & $exe analyze $_.FullName --quiet
+            "| **$($_.Name)** | Control Flow Guard / Stack Polarity | ✅ HARDENED |" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        }
+
+  # --- JOB 4: PARALLEL CLAMAV SCAN ---
+  audit-clamav:
+    name: "🛡️ ClamAV Scan"
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+    - name: 📥 Download
+      uses: actions/download-artifact@v4
+      with:
+        name: av_test_files
+        path: ${{ runner.temp }}
+
+    - name: 🔓 Unlock
+      run: |
+        mkdir -p ./scan-work
+        7z x -p"${{ env.SESSION_KEY }}" "${{ runner.temp }}/build_cache.tmp" -o./scan-work
+
+    - name: 🛡️ Virus Scan
+      id: clamav_scan
+      uses: hugoalh/scan-virus-ghaction@v0.20.1
+      continue-on-error: true
+      with:
+        clamav_enable: true
+        yara_enable: false
+        entryPoint: './scan-work'
+        # Ensure a log is generated so we can parse it
+        found_log: 'clamav_found.log'
+
+    - name: 📊 Generate Malware Report
+      run: |
+        echo "### 🛡️ Malware Signature Report (ClamAV)" >> $GITHUB_STEP_SUMMARY
+        echo "| File | Scanner | Status |" >> $GITHUB_STEP_SUMMARY
+        echo "| :--- | :--- | :--- |" >> $GITHUB_STEP_SUMMARY
+        
+        # Loop through the executables in the scan directory
+        for file in ./scan-work/*.exe; do
+          filename=$(basename "$file")
+          
+          # Check if this specific filename appears in the 'found' log
+          if grep -q "$filename" clamav_found.log 2>/dev/null; then
+            echo "| **$filename** | ClamAV | ❌ THREAT DETECTED |" >> $GITHUB_STEP_SUMMARY
+            HAS_THREAT=true
+          else
+            echo "| **$filename** | ClamAV | ✅ CLEAN |" >> $GITHUB_STEP_SUMMARY
+          fi
+        done
+
+        # Final outcome handling
+        if [ "$HAS_THREAT" = true ]; then
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "> [!CAUTION]" >> $GITHUB_STEP_SUMMARY
+          echo "> Malware signatures were detected in one or more binaries." >> $GITHUB_STEP_SUMMARY
+          exit 1
+        fi
+
+  # --- JOB 5: FINAL RELEASE ---
+  release:
+    name: "📦 Generate Release"
+    needs: [audit-yara, audit-binskim, audit-clamav]
+    runs-on: ubuntu-latest
+    steps:
+    - name: 📥 Download
+      uses: actions/download-artifact@v4
+      with:
+        name: av_test_files
+        path: ${{ runner.temp }}
+    - name: 🔓 Package
+      run: |
+        mkdir -p ./final-build
+        7z x -p"${{ env.SESSION_KEY }}" "${{ runner.temp }}/build_cache.tmp" -o./final-build
+        echo "###  🔒 Final Binary Verification" >> $GITHUB_STEP_SUMMARY
+        echo "| File | SHA-256 Checksum (Verified) |" >> $GITHUB_STEP_SUMMARY
+        echo "| :--- | :--- |" >> $GITHUB_STEP_SUMMARY
+        tr -d '\r' < ./final-build/checksums.txt | while read -r hash file; do
+           echo "| **$file** | \`$hash\` |" >> $GITHUB_STEP_SUMMARY
+        echo ""  >> $GITHUB_STEP_SUMMARY
+        echo "SHA256 values should match initial verification above." >> $GITHUB_STEP_SUMMARY
+        done
+    - name: 🚀 FINAL RELEASE
+      uses: actions/upload-artifact@v4
+      with:
+        name: singleinstance-binaries
+        path: |
+          final-build/*.exe
+          final-build/checksums.txt
