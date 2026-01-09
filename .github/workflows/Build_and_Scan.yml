@@ -30,6 +30,27 @@ jobs:
         "" | Add-Content -Path $env:GITHUB_STEP_SUMMARY
         "Once complete the ``singleinstance-binaries`` download contains both .exe files." | Add-Content -Path $env:GITHUB_STEP_SUMMARY
 
+    - name: 🏷️ Inject Comment Metadata
+      shell: pwsh
+      run: |
+        $rcPath = "path/to/your/resource.rc"
+        $dt = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+        $buildInfo = "Verified: $dt | Run: ${{ github.run_id }}"
+        
+        # Read the file and force UTF8 encoding to avoid corruption
+        $content = Get-Content $rcPath -Raw -Encoding UTF8
+        
+        # This regex is more flexible with whitespace to ensure it hits
+        if ($content -match 'VALUE\s+"Comments",\s+".*?"') {
+            $content = $content -replace '(VALUE\s+"Comments",\s+)".*?"', "`$1`"$buildInfo`""
+            Set-Content -Path $rcPath -Value $content -Encoding UTF8
+            Write-Host "✅ Metadata Injected: $buildInfo"
+        } else {
+            Write-Error "❌ Could not find Comments field in .rc file!"
+            exit 1
+        }
+
+
     - name: ➕ Add MSBuild
       uses: microsoft/setup-msbuild@v2
 
