@@ -34,22 +34,22 @@ jobs:
       shell: pwsh
       run: |
         $rcPath = "singleinstance/singleinstance.rc"
-        $dt = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+        $dt = Get-Date -Format "yyyy-MM-dd HH:mm"
+        # Ultra-Secure ID including datetime and unique run ID
         $buildInfo = "Verified: $dt | Run: ${{ github.run_id }}"
         
-        # Read the file and force UTF8 encoding to avoid corruption
+        # Read file with UTF8 to ensure we don't break the character encoding
         $content = Get-Content $rcPath -Raw -Encoding UTF8
         
-        # This regex is more flexible with whitespace to ensure it hits
+        # This regex looks for 'VALUE "Comments",' followed by any text in quotes
         if ($content -match 'VALUE\s+"Comments",\s+".*?"') {
             $content = $content -replace '(VALUE\s+"Comments",\s+)".*?"', "`$1`"$buildInfo`""
             Set-Content -Path $rcPath -Value $content -Encoding UTF8
             Write-Host "✅ Metadata Injected: $buildInfo"
         } else {
-            Write-Error "❌ Could not find Comments field in .rc file!"
+            Write-Error "❌ Could not find Comments field in .rc file! Ensure 'VALUE `"Comments`", `"any text`"' exists."
             exit 1
         }
-
 
     - name: ➕ Add MSBuild
       uses: microsoft/setup-msbuild@v2
