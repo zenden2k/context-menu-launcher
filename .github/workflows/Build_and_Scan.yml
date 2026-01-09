@@ -33,7 +33,7 @@ jobs:
     - name: 🏷️ Inject Comment Metadata
       shell: pwsh
       run: |
-        $rcPath = "path/to/your/resource.rc"
+        $rcPath = "singleinstance/singleinstance.rc"
         $dt = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
         $buildInfo = "Verified: $dt | Run: ${{ github.run_id }}"
         
