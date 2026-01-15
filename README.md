@@ -66,3 +66,9 @@ Windows Registry Editor Version 5.00
 @="\"d:\\singleinstance_hidden.exe\" \"%1\" py.exe \"C:\\myawesomescript.py\" $files --si-timeout 400"
 ```
 For debugging you may want to use singleinstance.exe until you have ironed out any bugs.
+
+## Autobuilds and Anti-Virus Issues
+
+Autobuilds and pre compiled .exe versions may trigger warnings from your AV software, especially for the hidden version. All builds are checked by Yara, BinSkim and ClamAV during the build process to ensure the code is clean. The main cause for the trigger is that the hidden versions CreateProcessW with the CREATE_NO_WINDOW flag is a powerful command that could be used for malicious purposes. Avast for example will sometimes on first run scan and send it for checking, after about 5-10 minutes it should allow you to use the .exe's unhindered.
+
+If you build your own .exe's from source locally you should find your AV will not complain.
