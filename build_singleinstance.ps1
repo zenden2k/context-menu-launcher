@@ -1,53 +1,72 @@
 # Build singleinstance.exe and singleinstance_hidden.exe
-# Finds Visual Studio and the latest MSVC toolkit, saves errors from version changes.
+# Finds Visual Studio, MSVC, and Windows SDK tools for verification.
 
-# 1. Locate vswhere.exe (Checking both x86 and 64-bit Program Files)
+# Locate vswhere.exe
 $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
 if (-not (Test-Path $vswhere)) {
     $vswhere = "${env:ProgramFiles}\Microsoft Visual Studio\Installer\vswhere.exe"
 }
 
 if (-not (Test-Path $vswhere)) {
-    Write-Error "Could not find vswhere.exe. Is Visual Studio Installer installed?"
+    Write-Error "Could not find vswhere.exe."
     exit 1
 }
 
-# 2. Get the VS Installation Path
+# Get VS and SDK Paths
 $vsPath = & $vswhere -latest -property installationPath
+# We need the SDK path for mt.exe
+$sdkPath = & $vswhere -latest -getComponent Microsoft.VisualStudio.Component.Windows10SDK.19041 -property installationPath
 
 if (-not $vsPath) {
     Write-Error "Visual Studio installation not found."
     exit 1
 }
 
-# 3. Define paths dynamically
+# Define paths
 $msBuildPath = Join-Path $vsPath "MSBuild\Current\Bin\MSBuild.exe"
 $msvcRoot = Join-Path $vsPath "VC\Tools\MSVC"
 
-# Find the latest MSVC toolset folder (e.g., 14.44.35207)
+# Find MSVC tools
 if (Test-Path $msvcRoot) {
     $latestMsvc = Get-ChildItem $msvcRoot | Sort-Object Name -Descending | Select-Object -First 1
-    $dumpbinPath = Join-Path $latestMsvc.FullName "bin\Hostx64\x64\dumpbin.exe"
+    $dumpbinPath = Join-Path $latestMsvc.FullName "bin\Hostx64\x86\dumpbin.exe"
 }
+
+# Find mt.exe (Usually in Program Files (x86)\Windows Kits)
+$mtPath = Get-ChildItem -Path "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Filter "mt.exe" -Recurive | 
+          Where-Object { $_.FullName -match "x86" } | 
+          Select-Object -First 1 -ExpandProperty FullName
 
 # --- Execution ---
 
-# Build the solution
+# Build
 if (Test-Path $msBuildPath) {
-    Write-Host "Building Release..." -ForegroundColor Green
-    & $msBuildPath /m:8 /property:Configuration=Release .\singleinstance.sln
-    & $msBuildPath /m:8 /property:Configuration=ReleaseHidden .\singleinstance.sln
-}
-else {
-    Write-Error "MSBuild not found at: $msBuildPath"
+    Write-Host "Building Release and ReleaseHidden..." -ForegroundColor Green
+    & $msBuildPath /m:8 /t:Build /p:Configuration=Release .\singleinstance.sln
+    & $msBuildPath /m:8 /t:Build /p:Configuration=ReleaseHidden .\singleinstance.sln
 }
 
-# Run dumpbin on the result
-if ($dumpbinPath -and (Test-Path $dumpbinPath)) {
-    Write-Host "Checking dependencies..." -ForegroundColor Green
-    & $dumpbinPath /dependents .\Release\singleinstance.exe
-    & $dumpbinPath /dependents .\Release\singleinstance_hidden.exe
+# Manifest Verification
+Write-Host "`nVerifying Manifests..." -ForegroundColor Cyan
+$exes = @(".\Release\singleinstance.exe", ".\Release\singleinstance_hidden.exe")
+
+foreach ($exe in $exes) {
+    if (Test-Path $exe) {
+        # Check for the embedded string
+        $manifestCheck = Select-String -Path $exe -Pattern "requestedExecutionLevel" -Quiet
+        if ($manifestCheck) {
+            Write-Host "[PASS] Manifest detected in: $(Split-Path $exe -Leaf)" -ForegroundColor Green
+        } else {
+            Write-Warning "[FAIL] No Manifest found in: $(Split-Path $exe -Leaf)"
+        }
+    }
 }
-else {
-    Write-Error "Dumpbin.exe not found. Check if C++ build tools are installed."
+
+# 5. Dependency Check
+if ($dumpbinPath -and (Test-Path $dumpbinPath)) {
+    Write-Host "`nChecking dependencies..." -ForegroundColor Green
+    foreach ($exe in $exes) {
+        Write-Host "--- $(Split-Path $exe -Leaf) ---" -ForegroundColor Gray
+        & $dumpbinPath /dependents $exe | Select-String "image has the following dependencies", ".dll"
+    }
 }
